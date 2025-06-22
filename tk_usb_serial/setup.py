@@ -1,8 +1,6 @@
 from setuptools import find_packages, setup
-import os
-from glob import glob
 
-package_name = 'tk_move_pre_designed_trajectory'
+package_name = 'tk_usb_serial'
 
 setup(
     name=package_name,
@@ -12,19 +10,17 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name), glob('launch/*launch.[pxy][yma]*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='tk',
     maintainer_email='takuchanapp@gmail.com',
-    description='Pre-designed trajectory movement package for autonomous robot navigation',
-    license='MIT',
+    description='TODO: Package description',
+    license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'circle_node     = tk_move_pre_designed_trajectory.circle_node:main',
-             'square_node     = tk_move_pre_designed_trajectory.square_node:main',
+            'serial_recorder = tk_usb_serial.serial_recorder_node:main',
         ],
     },
 )
