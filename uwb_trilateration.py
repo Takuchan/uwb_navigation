@@ -9,26 +9,24 @@ import threading
 from matplotlib.animation import FuncAnimation
 
 class UWBTrilateration:
-    def __init__(self, com_port='/dev/ttyUSB0', baud_rate=3000000):
+    def __init__(self, com_port='COM7', baud_rate=3000000):
         self.com_port = com_port
         self.baud_rate = baud_rate
         self.ser = None
         
         # Fixed anchor positions based on given distances
+        # UWB0が一番ベースとなる。
         self.anchors = self.calculate_anchor_positions()
         
         # Data storage
-        self.positions = deque(maxlen=100)
+        self.positions = deque(maxlen=100)  # メモリのことを考慮して100個だけデータを一時ほじほじする。
         self.current_distances = [0, 0, 0]
-        self.current_nlos = [0, 0, 0]  # nLos状態を記録
+        self.current_nlos = [0, 0, 0]  # Line of sight status nLOSはAnchorとTagの間に障害物があるかどうかを判定する(1 = あり 0 = なし)
         self.data_lock = threading.Lock()
-        self.running = True
-        
-        # Debug mode
-        self.debug = True
+        self.latest_uwb_data = {}  # Store latest data from each UWB
         
         # Visualization setup
-        plt.style.use('dark_background')
+        plt.style.use('dark_background') #なんとなくダーク
         self.fig = plt.figure(figsize=(12, 8))
         self.ax = self.fig.add_subplot(111, projection='3d')
         self.setup_plot()
@@ -38,84 +36,94 @@ class UWBTrilateration:
         # UWB0 at origin
         anchor0 = np.array([0, 0, 0])
         
-        # UWB1 at distance 776cm from UWB0
+        # UWB1の距離はUWB0よりも776cm離れている
         anchor1 = np.array([776, 0, 0])
         
-        # UWB2 positioned using triangulation from UWB0 and UWB1
+
+
+        # UWB2(Anchor2)のデータはUWB0とUWB1のデータを使って計算する。余弦定理を利用している。
         # Distance from UWB0: 789cm, Distance from UWB1: 530cm
         d01 = 776  # UWB0 to UWB1
         d02 = 789  # UWB0 to UWB2
         d12 = 530  # UWB1 to UWB2
         
-        # Calculate UWB2 position using law of cosines
+        # UWB2(Anchor)はほかのパラメータのデータを使って行う。余弦定理で求めたcosΘを掛け合わせている。
         x2 = (d02**2 - d12**2 + d01**2) / (2 * d01)
         y2 = np.sqrt(d02**2 - x2**2)
         anchor2 = np.array([x2, y2, 0])
         
         return [anchor0, anchor1, anchor2]
     
+
+    # シリアル通信を行う部分。
     def connect_serial(self):
-        """Connect to serial port with improved error handling"""
+        """Connect to serial port with better error handling"""
         try:
-            self.ser = serial.Serial(self.com_port, self.baud_rate, timeout=1)
+            self.ser = serial.Serial(
+                port=self.com_port, 
+                baudrate=self.baud_rate, 
+                timeout=0.1,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE
+            )
+            time.sleep(2)  # Wait for connection to stabilize
             print(f"Connected to {self.com_port} at {self.baud_rate} baud")
-            
-            # Wait a bit for the connection to stabilize
-            time.sleep(2)
             
             # Clear any existing data in buffer
             self.ser.flushInput()
-            
             return True
         except Exception as e:
             print(f"Failed to connect to serial port: {e}")
             return False
     
+
+    # UWBのシリアル通信から送られてきたデータの加工 `APP:～ より後ろを持ってくる`
     def parse_uwb_data(self, data_line):
-        """Parse UWB data from serial line - improved parsing"""
+        """Parse UWB data from serial line - improved version"""
         try:
-            if self.debug:
-                print(f"Parsing line: {data_line}")
-            
-            # より正確な正規表現パターン
-            # APP :INFO :TWR[0].distance : 195 のような形式を解析
-            distance_pattern = r'APP\s*:\s*INFO\s*:\s*TWR\[(\d+)\]\.distance\s*:\s*([\d.]+)'
-            nlos_pattern = r'APP\s*:\s*INFO\s*:\s*TWR\[(\d+)\]\.nLos\s*:\s*(\d+)'
-            
-            uwb_data = {}
-            
-            # 距離データを抽出
-            distance_matches = re.findall(distance_pattern, data_line)
-            for match in distance_matches:
-                twr_id = int(match[0])
-                distance = float(match[1])
+            # Clean the line and look for APP :INFO patterns
+            if 'APP' in data_line and 'INFO' in data_line and 'TWR[' in data_line:
+                # Extract TWR data using improved regex
+                twr_pattern = r'TWR\[(\d+)\]\.(\w+)\s*:\s*([\d.-]+)'
+                match = re.search(twr_pattern, data_line)
                 
-                if twr_id not in uwb_data:
-                    uwb_data[twr_id] = {}
-                uwb_data[twr_id]['distance'] = distance
-                
-                if self.debug:
-                    print(f"Found distance: TWR[{twr_id}] = {distance}cm")
-            
-            # nLos状態を抽出
-            nlos_matches = re.findall(nlos_pattern, data_line)
-            for match in nlos_matches:
-                twr_id = int(match[0])
-                nlos = int(match[1])
-                
-                if twr_id not in uwb_data:
-                    uwb_data[twr_id] = {}
-                uwb_data[twr_id]['nLos'] = nlos
-                
-                if self.debug:
-                    print(f"Found nLos: TWR[{twr_id}] = {nlos}")
-            
-            return uwb_data
-            
+                if match:
+                    twr_id = int(match.group(1))
+                    param = match.group(2)
+                    value = float(match.group(3))
+                    
+                    # Store data by UWB ID
+                    if twr_id not in self.latest_uwb_data:
+                        self.latest_uwb_data[twr_id] = {}
+                    
+                    self.latest_uwb_data[twr_id][param] = value
+                    
+                    print(f"Parsed: UWB{twr_id}.{param} = {value}")
+                    return twr_id, param, value
+                    
         except Exception as e:
-            if self.debug:
-                print(f"Error parsing data: {e}")
-            return {}
+            print(f"Error parsing data: {e}")
+        
+        return None, None, None
+    
+    def check_complete_data_set(self):
+        """Check if we have complete distance data from all UWBs"""
+        distances = [0, 0, 0]
+        nlos_status = [0, 0, 0]
+        
+        for i in range(3):
+            if i in self.latest_uwb_data:
+                if 'distance' in self.latest_uwb_data[i]:
+                    distances[i] = self.latest_uwb_data[i]['distance']
+                if 'nLos' in self.latest_uwb_data[i]:
+                    nlos_status[i] = self.latest_uwb_data[i]['nLos']
+        
+        # Check if all distances are valid (> 0)
+        if all(d > 0 for d in distances):
+            return distances, nlos_status
+        
+        return None, None
     
     def trilaterate_3d(self, distances):
         """Perform 3D trilateration using least squares"""
@@ -123,21 +131,22 @@ class UWBTrilateration:
             return None
         
         try:
-            # Set up equations for trilateration
-            # (x-x1)^2 + (y-y1)^2 + (z-z1)^2 = r1^2
-            # Convert to linear system using differences
+
+            #x_diff,y_diffは三平方の定理で求めた結果から得られた物。
             
             A = []
             b = []
             
             for i in range(1, len(distances)):
                 if distances[i] > 0 and distances[0] > 0:
+                    # 係数 2(x_i - x_0) を計算している
                     x_diff = 2 * (self.anchors[i][0] - self.anchors[0][0])
                     y_diff = 2 * (self.anchors[i][1] - self.anchors[0][1])
                     z_diff = 2 * (self.anchors[i][2] - self.anchors[0][2])
                     
                     A.append([x_diff, y_diff, z_diff])
-                    
+                   
+                    # 方程式の右辺の長い計算をしている
                     b_val = (distances[0]**2 - distances[i]**2 + 
                             np.sum(self.anchors[i]**2) - np.sum(self.anchors[0]**2))
                     b.append(b_val)
@@ -148,7 +157,8 @@ class UWBTrilateration:
             A = np.array(A)
             b = np.array(b)
             
-            # Solve using least squares
+            # Solve using least squares lstsqはほんの少しの誤差を見逃してくれてよしなに調整してくれる。
+            # 連立一次方程式
             position, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
             
             return position
@@ -194,103 +204,84 @@ class UWBTrilateration:
             
             # Plot current position
             current_pos = self.positions[-1]
-            color = 'lime' if all(nlos == 1 for nlos in self.current_nlos) else 'yellow'
             self.ax.scatter(current_pos[0], current_pos[1], current_pos[2], 
-                          c=color, s=200, marker='o', label='Current Position')
+                          c='lime', s=200, marker='o', label='Current Position')
             
-            # Add detailed information as text
+            # Add distance and nLos information as text
             info_text = f'Position:\nX: {current_pos[0]:.1f}cm\nY: {current_pos[1]:.1f}cm\nZ: {current_pos[2]:.1f}cm\n\n'
-            info_text += 'Distances & Signal Quality:\n'
+            info_text += 'Distances:\n'
             for i in range(3):
-                status = "Good" if self.current_nlos[i] == 1 else "NLOS"
-                info_text += f'UWB{i}: {self.current_distances[i]:.1f}cm ({status})\n'
+                nlos_str = "✓" if self.current_nlos[i] == 1 else "✗"
+                info_text += f'UWB{i}: {self.current_distances[i]:.1f}cm {nlos_str}\n'
             
             self.ax.text2D(0.02, 0.98, info_text, transform=self.ax.transAxes, 
-                          fontsize=9, verticalalignment='top', color='white',
-                          bbox=dict(boxstyle='round', facecolor='black', alpha=0.8))
+                          fontsize=10, verticalalignment='top', color='white',
+                          bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
             
             self.ax.legend(loc='upper right')
     
     def serial_reader(self):
-        """Separate thread for reading serial data - improved data collection"""
-        current_frame_data = {}  # 1つのフレームのデータを蓄積
+        """Separate thread for reading serial data"""
+        print("Serial reader thread started...")
+        buffer = ""
         
         try:
-            while self.running:
+            while True:
                 if self.ser and self.ser.in_waiting > 0:
-                    line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                    # Read available data
+                    new_data = self.ser.read(self.ser.in_waiting).decode('utf-8', errors='ignore')
+                    buffer += new_data
                     
-                    if self.debug and line:
-                        print(f"Raw line: {line}")
-                    
-                    if 'TWR' in line and 'APP' in line:
-                        uwb_data = self.parse_uwb_data(line)
+                    # Process complete lines
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line = line.strip()
                         
-                        # データを現在のフレームに追加
-                        for twr_id, data in uwb_data.items():
-                            if twr_id not in current_frame_data:
-                                current_frame_data[twr_id] = {}
-                            current_frame_data[twr_id].update(data)
-                        
-                        # 3つのUWBすべてからdistanceデータが揃ったかチェック
-                        if self.has_complete_frame(current_frame_data):
-                            distances = [0, 0, 0]
-                            nlos_states = [0, 0, 0]
+                        if line and 'TWR[' in line:
+                            print(f"Raw line: {line}")
                             
-                            for twr_id in range(3):
-                                if twr_id in current_frame_data:
-                                    distances[twr_id] = current_frame_data[twr_id].get('distance', 0)
-                                    nlos_states[twr_id] = current_frame_data[twr_id].get('nLos', 0)
+                            twr_id, param, value = self.parse_uwb_data(line)
                             
-                            if all(d > 0 for d in distances):
-                                # Perform trilateration
-                                position = self.trilaterate_3d(distances)
+                            if twr_id is not None and param == 'distance':
+                                # Check if we have complete data set after distance update
+                                distances, nlos_status = self.check_complete_data_set()
                                 
-                                if position is not None:
-                                    with self.data_lock:
-                                        self.positions.append(position)
-                                        self.current_distances = distances
-                                        self.current_nlos = nlos_states
+                                if distances is not None:
+                                    print(f"Complete data set: {distances}")
                                     
-                                    signal_quality = "Good" if all(nlos == 1 for nlos in nlos_states) else "NLOS detected"
-                                    print(f"Position: X={position[0]:.1f}, Y={position[1]:.1f}, Z={position[2]:.1f} ({signal_quality})")
-                            
-                            # フレームデータをリセット
-                            current_frame_data = {}
+                                    # Perform trilateration
+                                    position = self.trilaterate_3d(distances)
+                                    
+                                    if position is not None:
+                                        with self.data_lock:
+                                            self.positions.append(position)
+                                            self.current_distances = distances
+                                            self.current_nlos = nlos_status
+                                        
+                                        print(f"New position: X={position[0]:.1f}, Y={position[1]:.1f}, Z={position[2]:.1f}")
                 
-                time.sleep(0.01)
+                time.sleep(0.001)  # Very small delay
                 
         except Exception as e:
             print(f"Serial reader error: {e}")
-    
-    def has_complete_frame(self, frame_data):
-        """Check if we have complete distance data from all 3 UWBs"""
-        for twr_id in range(3):
-            if twr_id not in frame_data or 'distance' not in frame_data[twr_id]:
-                return False
-        return True
     
     def process_data(self):
         """Main data processing with real-time visualization"""
         if not self.connect_serial():
             return
         
-        print("Starting data collection...")
-        print("Waiting for UWB data...")
-        
         # Start serial reading thread
         serial_thread = threading.Thread(target=self.serial_reader, daemon=True)
         serial_thread.start()
         
         # Set up animation for real-time plotting
-        ani = FuncAnimation(self.fig, self.update_visualization, interval=200, cache_frame_data=False)
+        ani = FuncAnimation(self.fig, self.update_visualization, interval=100, cache_frame_data=False)
         
         try:
-            plt.show()
+            plt.show()  # This will block and show the real-time plot
         except KeyboardInterrupt:
             print("\nStopping UWB trilateration...")
         finally:
-            self.running = False
             if self.ser:
                 self.ser.close()
 
