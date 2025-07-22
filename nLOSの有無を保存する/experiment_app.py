@@ -11,13 +11,12 @@ class ExperimentApp:
     def __init__(self, root):
         self.root = root
         self.root.title("データ収集実験アプリケーション")
-        self.root.geometry("800x750")
-
+        self.root.geometry("900x650") # ウィンドウサイズを少し広げます
 
         self.experiment_data_set = ExperimentDataSet()
         self.experiment_data_set.load_from_csv()
 
-        self.experiment_runner = ExperimentRunner()
+        self.experiment_runner = ExperimentRunner(com_port='COM7', baud_rate=3000000) # 環境に合わせてCOMポートを変更してください
 
         self._setup_experiment_count_frame()
         self._setup_experiment_condition_frame()
@@ -37,6 +36,14 @@ class ExperimentApp:
         tk.Button(delete_button_frame, text="選択した結果を削除", command=self._delete_selected_results).pack()
 
         self._update_results_display()
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+
+    def _on_closing(self):
+        if self.experiment_runner:
+            self.experiment_runner.disconnect_serial()
+        self.root.destroy()
+
     def _setup_experiment_count_frame(self):
         frame = tk.LabelFrame(self.root, text="実験回数設定", padx=10, pady=10)
         frame.pack(pady=10, padx=10, fill="x")
@@ -48,8 +55,6 @@ class ExperimentApp:
         tk.Radiobutton(frame, text="5回", variable=self.experiment_count, value=5).pack(side=tk.LEFT, padx=5)
         tk.Radiobutton(frame, text="10回", variable=self.experiment_count, value=10).pack(side=tk.LEFT, padx=5)
         tk.Label(frame, text="回数分、連続でデータを取得します。").pack(side=tk.LEFT, padx=10)
-
-        frame.grid_columnconfigure(1, weight=1)
 
     def _setup_experiment_condition_frame(self):
         frame = tk.LabelFrame(self.root, text="実験条件設定", padx=10, pady=10)
@@ -89,13 +94,15 @@ class ExperimentApp:
         frame = tk.LabelFrame(self.root, text="実験結果", padx=10, pady=10)
         frame.pack(pady=10, padx=10, fill="both", expand=True)
 
+        # カラムに "期待LOS/nLOS" を追加
         self.results_tree = ttk.Treeview(frame, columns=(
-            "No", "距離(m)", "向き", "試行", "計測時間(ms)", "最頻距離(m)", "最頻LOS/nLOS", "最頻水平角(°)", "最頻仰角(°)", "備考"
+            "No", "距離(m)", "向き", "期待LOS/nLOS", "試行", "計測時間(ms)", "最頻距離(m)", "最頻LOS/nLOS", "最頻水平角(°)", "最頻仰角(°)", "備考"
         ), show="headings")
 
         self.results_tree.heading("No", text="No", anchor=tk.W)
         self.results_tree.heading("距離(m)", text="距離(m)", anchor=tk.W)
         self.results_tree.heading("向き", text="向き", anchor=tk.W)
+        self.results_tree.heading("期待LOS/nLOS", text="期待LOS/nLOS", anchor=tk.W) # 新しいヘッダ
         self.results_tree.heading("試行", text="試行", anchor=tk.W)
         self.results_tree.heading("計測時間(ms)", text="計測時間(ms)", anchor=tk.W)
         self.results_tree.heading("最頻距離(m)", text="最頻距離(m)", anchor=tk.W)
@@ -107,6 +114,7 @@ class ExperimentApp:
         self.results_tree.column("No", width=40, stretch=tk.NO)
         self.results_tree.column("距離(m)", width=60, stretch=tk.NO)
         self.results_tree.column("向き", width=90, stretch=tk.NO)
+        self.results_tree.column("期待LOS/nLOS", width=110, stretch=tk.NO) # 新しいカラムの幅
         self.results_tree.column("試行", width=50, stretch=tk.NO)
         self.results_tree.column("計測時間(ms)", width=90, stretch=tk.NO)
         self.results_tree.column("最頻距離(m)", width=90, stretch=tk.NO)
@@ -121,16 +129,17 @@ class ExperimentApp:
         self.results_tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill="y")
 
-
     def _update_results_display(self):
         for item in self.results_tree.get_children():
             self.results_tree.delete(item)
 
         for res in self.experiment_data_set.get_all_results():
+            # valuesの順番に "期待LOS/nLOS" を追加
             self.results_tree.insert("", tk.END, values=(
                 res.experiment_no,
                 res.distance_m,
                 res.uwb_orientation_condition,
+                res.nlos_los_expected, # ここで期待条件を表示
                 res.trial_count,
                 res.measurement_time_ms,
                 res.mode_distance_m,
@@ -139,14 +148,18 @@ class ExperimentApp:
                 res.mode_elevation_angle_deg,
                 res.remarks
             ))
-
+            
     def _start_experiment(self):
+        if not self.experiment_runner.ser or not self.experiment_runner.ser.is_open:
+            messagebox.showerror("エラー", "シリアルポートが接続されていません。実験を開始できません。")
+            return
+
         delay_time = self.delay_time_var.get()
         num_repetitions = self.experiment_count.get()
 
         distance = int(self.distance_var.get())
         uwb_orientation = self.uwb_orientation_var.get()
-        nlos_los_expected = self.nlos_los_var.get()
+        nlos_los_expected = self.nlos_los_var.get() # ここで期待条件を取得
         z_position_type = self.z_position_var.get()
 
         experiment_type_map = {
@@ -172,7 +185,7 @@ class ExperimentApp:
                     experiment_no=current_experiment_no,
                     distance_m=distance,
                     uwb_orientation_condition=uwb_orientation,
-                    nlos_status_expected=nlos_los_expected,
+                    nlos_status_expected=nlos_los_expected, # ここでExperimentRunnerに渡す
                     trial_count=i + 1
                 )
 
@@ -180,6 +193,7 @@ class ExperimentApp:
                     experiment_no=raw_result["experiment_no"],
                     distance_m=raw_result["distance_m"],
                     uwb_orientation_condition=raw_result["uwb_orientation_condition"],
+                    nlos_los_expected=nlos_los_expected, # ExperimentResultにも追加
                     trial_count=raw_result["trial_count"],
                     measurement_time_ms=raw_result["measurement_time_ms"],
                     mode_distance_m=raw_result["mode_distance_m"],
@@ -187,7 +201,7 @@ class ExperimentApp:
                     mode_horizontal_angle_deg=raw_result["mode_horizontal_angle_deg"],
                     mode_elevation_angle_deg=raw_result["mode_elevation_angle_deg"],
                     remarks=f"Z位置関係: {z_position_type}",
-                    raw_frames_data=raw_result["raw_frames_data"] # ここで生データを渡す
+                    raw_frames_data=raw_result["raw_frames_data"]
                 )
                 self.experiment_data_set.add_result(new_experiment_result)
                 self._update_results_display()
@@ -218,6 +232,8 @@ class ExperimentApp:
         for item_id in selected_items:
             values = self.results_tree.item(item_id, 'values')
             if values:
+                # 削除されるカラムの位置が変更されたため、インデックスを再確認
+                # 以前はvalues[0]がexperiment_noだったが、今は変わらない
                 experiment_nos_to_delete.append(int(values[0]))
 
         self.experiment_data_set.results = [
