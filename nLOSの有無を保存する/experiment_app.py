@@ -16,7 +16,7 @@ class ExperimentApp:
         self.experiment_data_set = ExperimentDataSet()
         self.experiment_data_set.load_from_csv()
 
-        self.experiment_runner = ExperimentRunner(com_port='COM7', baud_rate=3000000) # 環境に合わせてCOMポートを変更してください
+        self.experiment_runner = ExperimentRunner(com_port='/dev/ttyUSB0', baud_rate=3000000) # 環境に合わせてCOMポートを変更してください
 
         self._setup_experiment_count_frame()
         self._setup_experiment_condition_frame()
@@ -63,7 +63,7 @@ class ExperimentApp:
         tk.Label(frame, text="距離 (m):").grid(row=0, column=0, padx=5, pady=2, sticky="w")
         self.distance_var = tk.StringVar(value="5")
         ttk.Combobox(frame, textvariable=self.distance_var,
-                     values=["5", "10", "20", "30", "40", "50"], state="readonly").grid(row=0, column=1, padx=5, pady=2, sticky="ew")
+                     values=["5", "10", "15", "20", "25"], state="readonly").grid(row=0, column=1, padx=5, pady=2, sticky="ew")
 
         tk.Label(frame, text="UWB向き条件:").grid(row=1, column=0, padx=5, pady=2, sticky="w")
         self.uwb_orientation_var = tk.StringVar(value="垂直")
@@ -78,7 +78,7 @@ class ExperimentApp:
         tk.Label(frame, text="Z位置関係 (実験タイプ):").grid(row=3, column=0, padx=5, pady=2, sticky="w")
         self.z_position_var = tk.StringVar(value="Z揃え (実験①)")
         ttk.Combobox(frame, textvariable=self.z_position_var,
-                     values=["Z揃え (実験①)", "Anchor=Tag+1000mm (実験②)", "Anchor電波上から (実験③)"], state="readonly").grid(row=3, column=1, padx=5, pady=2, sticky="ew")
+                     values=["Z揃え (実験①)", "高さtag-１ｍでの計測", "Anchor電波上から (実験③)"], state="readonly").grid(row=3, column=1, padx=5, pady=2, sticky="ew")
 
         frame.grid_columnconfigure(1, weight=1)
 

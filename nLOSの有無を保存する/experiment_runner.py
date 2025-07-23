@@ -77,7 +77,7 @@ class ExperimentRunner:
                     # nLos抽出
                     nlos_match = re.search(nlos_pattern, line)
                     if nlos_match and int(nlos_match.group(1)) == 0: # TWR[0]のみを対象
-                        current_twr0_frame["nlos_los"] = "LOS" if int(nlos_match.group(2)) == 1 else "nLOS"
+                        current_twr0_frame["nlos_los"] = "LOS" if int(nlos_match.group(2)) == 0 else "nLOS"
                         # print(f"  nLos: {current_twr0_frame['nlos_los']}") # デバッグ用
 
                     # distance抽出 (cmをmに変換)
