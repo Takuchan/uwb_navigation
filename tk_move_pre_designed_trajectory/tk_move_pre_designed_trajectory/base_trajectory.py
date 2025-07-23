@@ -16,7 +16,7 @@ class BaseTrajectoryNode(Node):
         self.declare_parameter('frequency', 10.0)
         
         # Publishers
-        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/rover_twist', 10)
         
         # TTS Client
         self.tts_client = self.create_client(TTS, 'tts_service')

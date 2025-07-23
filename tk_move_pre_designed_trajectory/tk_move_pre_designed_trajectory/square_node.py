@@ -39,9 +39,9 @@ class SquareNode(BaseTrajectoryNode):
 
         # 各動作にかかる時間を計算
         # 直進時間 = 距離 / 速度
-        self.move_duration = self.side_length / self.linear_velocity+0.579 if self.linear_velocity > 0 else float('inf')
+        self.move_duration = self.side_length / self.linear_velocity if self.linear_velocity > 0 else float('inf')
         # 旋回時間 = 角度 / 角速度 (90度 = pi/2 ラジアン)
-        self.turn_duration = (math.pi / 2) / abs(self.turn_angular_velocity)+0.572 if self.turn_angular_velocity != 0 else float('inf')
+        self.turn_duration = (math.pi / 2) / abs(self.turn_angular_velocity) if self.turn_angular_velocity != 0 else float('inf')
 
         # 状態を管理する変数
         self.state = 'idle' # 'moving', 'stopping_before_turn', 'turning', 'stopping_after_turn', 'idle'

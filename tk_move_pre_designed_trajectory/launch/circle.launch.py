@@ -10,10 +10,10 @@ def generate_launch_description():
             output='screen',
             emulate_tty=True,
             parameters=[
-                {'linear_velocity': 0.5},
-                {'angular_velocity_limit': 1.0},
+                {'linear_velocity': 1.5},
+                {'angular_velocity_limit': 2.0},
                 {'frequency': 20.0},
-                {'radius': 2.0},
+                {'radius': 10.0},
                 {'laps': 2.0}
             ]
         )
