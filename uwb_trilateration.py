@@ -43,9 +43,9 @@ class UWBTrilateration:
 
         # UWB2(Anchor2)のデータはUWB0とUWB1のデータを使って計算する。余弦定理を利用している。
         # Distance from UWB0: 789cm, Distance from UWB1: 530cm
-        d01 = 776  # UWB0 to UWB1
-        d02 = 789  # UWB0 to UWB2
-        d12 = 530  # UWB1 to UWB2
+        d01 = 1180  # UWB0 to UWB1
+        d02 = 1225  # UWB0 to UWB2
+        d12 = 525  # UWB1 to UWB2
         
         # UWB2(Anchor)はほかのパラメータのデータを使って行う。余弦定理で求めたcosΘを掛け合わせている。
         x2 = (d02**2 - d12**2 + d01**2) / (2 * d01)
