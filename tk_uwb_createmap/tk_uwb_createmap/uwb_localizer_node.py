@@ -124,12 +124,6 @@ class UWBLocalizerNode(Node):
         # アンカーマーカー発行（静的）
         self.publish_anchor_markers()
         
-        # Pygame初期化（別スレッド）
-        if self.enable_pygame:
-            self.pygame_thread = threading.Thread(target=self.pygame_visualization)
-            self.pygame_thread.daemon = True
-            self.pygame_thread.start()
-        
         self.get_logger().info("UWB自己位置推定ノードが開始されました")
     
     def odom_callback(self, msg: Odometry):
@@ -162,6 +156,7 @@ class UWBLocalizerNode(Node):
         
         # 視野角制約を適用したデータフィルタリング
         filtered_data = self.apply_fov_constraint(uwb_data)
+        self.get_logger().info(f"filterdataは{filtered_data}")
         
         # 三辺測位実行
         position = self.perform_trilateration(filtered_data)
@@ -185,7 +180,8 @@ class UWBLocalizerNode(Node):
     
     def apply_fov_constraint(self, uwb_data):
         """
-        視野角制約を適用：ロボットの前方120°のみ信頼、後方240°は除外
+        視野角制約を適用：ロボットの前方±60°（合計120°）範囲外のアンカーは
+        distanceデータは使用するが、nLOS情報は信頼せずLOSとして扱わない
         """
         filtered_data = {}
         
@@ -196,6 +192,12 @@ class UWBLocalizerNode(Node):
             2: self.trilateration_solver.anchor2
         }
         
+        if self.last_valid_uwb_position is None:
+            # 初回は全データを使用
+            return uwb_data
+        
+        robot_pos = self.last_valid_uwb_position
+        
         for i, (twr_key, data) in enumerate(uwb_data.items()):
             if data is None:
                 filtered_data[twr_key] = None
@@ -204,24 +206,20 @@ class UWBLocalizerNode(Node):
             # データをコピー
             filtered_data[twr_key] = data.copy()
             
-            # ロボット位置が有効な場合のみ視野角制約を適用
-            if self.robot_position is not None:
-                # アンカーへの方向ベクトル
-                anchor_pos = anchor_positions[i]
-                to_anchor = anchor_pos - self.robot_position
-                anchor_angle = math.atan2(to_anchor[1], to_anchor[0])
-                
-                # ロボット向きとの角度差
-                angle_diff = self.normalize_angle(anchor_angle - self.robot_heading)
-                
-                # 前方120°範囲外（後方240°）の場合は、nLOS情報を信頼しない
-                if abs(angle_diff) > self.fov_angle/2:
-                    # 距離データは使用するが、nLOS扱いにする
-                    filtered_data[twr_key]['nlos_los'] = 'nLOS'
-                    self.get_logger().debug(f"アンカー{i}: 視野角外({math.degrees(angle_diff):.1f}°) - nLOS扱い")
-                else:
-                    self.get_logger().debug(f"アンカー{i}: 視野角内({math.degrees(angle_diff):.1f}°) - 元データ使用")
-        
+            # アンカーへの方向ベクトル
+            anchor_pos = anchor_positions[i]
+            to_anchor = anchor_pos - robot_pos
+            anchor_angle = math.atan2(to_anchor[1], to_anchor[0])
+            
+            # ロボット向きとの角度差
+            angle_diff = self.normalize_angle(anchor_angle - self.robot_heading)
+            
+            # 視野角外の場合は、nLOS情報を信頼せずnLOSとして扱う
+            if abs(angle_diff) > self.fov_angle/2:
+                filtered_data[twr_key]['nlos_los'] = 'nLOS'  # 強制的にnLOSに設定
+                self.get_logger().debug(f"アンカー{i}: 視野角外 - nLOS扱い")
+            # 視野角内の場合は元のnLOS情報を保持
+            
         return filtered_data
     
     def normalize_angle(self, angle):

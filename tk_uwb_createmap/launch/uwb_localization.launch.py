@@ -38,7 +38,7 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='static_transform_publisher_tag',
         output='screen',
-        arguments=['0.1', '0.0', '0.2', '0', '0', '0', 'base_link', 'uwb_tag']
+        arguments=['0.1', '0.0', '0.2', '0', '0', '0', 'base_footprint', 'uwb_tag']
     )
 
 
