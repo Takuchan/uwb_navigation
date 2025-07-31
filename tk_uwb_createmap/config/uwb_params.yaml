@@ -1,0 +1,21 @@
+uwb_localizer_node:
+  ros__parameters:
+    # UWB通信設定
+    com_port: "/dev/ttyUSB1"
+    baud_rate: 3000000
+    num_anchors: 3
+    
+    # EKFパラメータ
+    ekf_dt: 0.1
+    
+    # 視野角制約
+    fov_angle: 120.0  # 度
+    
+    # フレーム名
+    map_frame: "map"
+    odom_frame: "odom"
+    base_link_frame: "base_link"
+    uwb_tag_frame: "uwb_tag"
+    
+    # 発行頻度
+    publish_frequency: 10.0

@@ -8,12 +8,12 @@ def main():
     """
     # --- 事前設定 ---
     # アンカー間の物理的な距離を設定します (メートル単位)
-    DISTANCE_0_TO_1 = 11.40  # m
-    DISTANCE_1_TO_2 = 5.52   # m
-    DISTANCE_0_TO_2 = 13.49  # m
+    DISTANCE_0_TO_1 = 6.9  # m
+    DISTANCE_1_TO_2 = 5.7   # m
+    DISTANCE_0_TO_2 = 5.9  # m
 
     # シリアルポートとアンカーの数を設定
-    SERIAL_PORT = "COM7"  # ご自身の環境に合わせて変更してください
+    SERIAL_PORT = "/dev/ttyUSB0"  # ご自身の環境に合わせて変更してください
     NUM_ANCHORS = 3
     
     # --- 初期化と実行 ---

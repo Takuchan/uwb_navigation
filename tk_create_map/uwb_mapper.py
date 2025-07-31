@@ -41,7 +41,7 @@ class UwbMapper:
         ])
 
         # EKFの初期化
-        self.dt = 1.0 / 20.0  # 20Hz
+        self.dt = 0.2
         initial_pos = np.array([solver.anchor1[0] / 2, solver.anchor2[1] / 2]) # 適当な初期位置
         self.ekf = ExtendedKalmanFilter(dt=self.dt, initial_pos=initial_pos)
         
