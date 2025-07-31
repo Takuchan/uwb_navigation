@@ -7,29 +7,27 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     
-    
-    # --- アンカー間距離のLaunch引数を宣言 ---
     declare_d01_arg = DeclareLaunchArgument(
         'd01', default_value='7.12',
-        description='Distance between anchor 0 and 1 in meters.'
+        description='0to1のアンカー間距離 [m]'  
     )
     declare_d12_arg = DeclareLaunchArgument(
         'd12', default_value='1.66',
-        description='Distance between anchor 1 and 2 in meters.'
+        description='1to2のアンカー間距離 [m]'
     )
     declare_d02_arg = DeclareLaunchArgument(
         'd02', default_value='7.12',
-        description='Distance between anchor 0 and 2 in meters.'
+        description='0to2のアンカー間距離 [m]'
     )
     
     # シリアルポート設定
     declare_com_port_arg = DeclareLaunchArgument(
         'com_port', default_value='/dev/ttyUSB0',
-        description='Serial port for UWB communication.'
+        description='UWB通信のためのシリアルポート'
     )
     declare_baud_rate_arg = DeclareLaunchArgument(
         'baud_rate', default_value='3000000',
-        description='Baud rate for serial communication.'
+        description='ボーレート'
     )
 
     # UWBタグの位置をロボットのベースリンクからの静的TFとして設定
@@ -39,6 +37,14 @@ def generate_launch_description():
         name='static_transform_publisher_tag',
         output='screen',
         arguments=['0.1', '0.0', '0.2', '0', '0', '0', 'base_footprint', 'uwb_tag']
+    )
+
+    static_tf_map = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_transform_publisher_map',
+        output='screen',
+        arguments=['0.0', '0.0', '0.0', '0', '0', '0', 'map', 'odom']
     )
 
 
@@ -61,7 +67,7 @@ def generate_launch_description():
                 'fov_angle': 120.0,  # 視野角 [度]
                 'map_frame': 'map',
                 'odom_frame': 'odom',
-                'base_link_frame': 'base_link',
+                'base_link_frame': 'base_footprint',
                 'uwb_tag_frame': 'uwb_tag',
                 'publish_frequency': 10.0
             }
@@ -76,5 +82,6 @@ def generate_launch_description():
         declare_com_port_arg,
         declare_baud_rate_arg,
         static_tf_tag,
+        static_tf_map,
         uwb_localizer_node,
     ])

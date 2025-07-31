@@ -38,7 +38,7 @@ class UWBLocalizerNode(Node):
         self.declare_parameters(
             namespace='',
             parameters=[
-                ('d01', 6.82),  # アンカー0-1間距離 [m]
+                ('d01', 7.12),  # アンカー0-1間距離 [m]
                 ('d12', 1.66),  # アンカー1-2間距離 [m] 
                 ('d02', 7.12),  # アンカー0-2間距離 [m]
                 ('com_port', '/dev/ttyUSB0'),
@@ -48,7 +48,7 @@ class UWBLocalizerNode(Node):
                 ('fov_angle', 120.0),  # 視野角 [度]
                 ('map_frame', 'map'),
                 ('odom_frame', 'odom'),
-                ('base_link_frame', 'base_link'),
+                ('base_link_frame', 'base_footprint'),
                 ('uwb_tag_frame', 'uwb_tag'),
                 ('publish_frequency', 10.0),
                 ('enable_pygame', True)  # Pygame可視化の有効/無効
@@ -154,14 +154,13 @@ class UWBLocalizerNode(Node):
         """メインループ：UWBデータ取得→三辺測位→EKF→パブリッシュ"""
         
         # UWBデータ取得
-        uwb_data = self.serial_filter.read_anchor_data_snapshot(timeout=0.05)
+        uwb_data = self.serial_filter.read_anchor_data_snapshot(timeout=0.2)
         if not uwb_data:
             return
         
         # 視野角制約を適用したデータフィルタリング
         filtered_data = self.apply_fov_constraint(uwb_data)
-        self.get_logger().info(f"filterdataは{filtered_data}")
-        
+
         # 三辺測位実行
         position = self.perform_trilateration(filtered_data)
         if position is not None:
@@ -220,11 +219,9 @@ class UWBLocalizerNode(Node):
             # ロボット向きとの角度差
             angle_diff = self.normalize_angle(anchor_angle - self.robot_heading)
             
-            # 視野角外の場合は、nLOS情報を信頼せずnLOSとして扱う
+            # 視野角外の場合は、nLOS情報を信頼せずinvisibleとして扱う
             if abs(angle_diff) > self.fov_angle/2:
-                filtered_data[twr_key]['nlos_los'] = 'nLOS'  # 強制的にnLOSに設定
-                self.get_logger().debug(f"アンカー{i}: 視野角外 - nLOS扱い")
-            # 視野角内の場合は元のnLOS情報を保持
+                filtered_data[twr_key]['nlos_los'] = 'invisible'  # 視野角外なのでinvisibleとする。
             
         return filtered_data
     
@@ -344,7 +341,8 @@ class UWBLocalizerNode(Node):
             
             marker_array.markers.append(marker)
         
-        self.anchor_marker_pub.publish(marker_array)
+        for _ in range(100):  # マーカーの持続時間を長くするために複製
+            self.anchor_marker_pub.publish(marker_array)
     
     def publish_connection_markers(self, uwb_data, robot_pos):
         """ロボット-アンカー間の接続線をLOS/nLOS/視野角外で色分けして表示"""
@@ -390,7 +388,7 @@ class UWBLocalizerNode(Node):
             
             # 色分け
             if twr_key in uwb_data and uwb_data[twr_key] is not None:
-                nlos_status = uwb_data[twr_key].get('nlos_los', 'nLOS')
+                nlos_status = uwb_data[twr_key].get('nlos_los', 'invisible')
                 
                 if is_in_fov and nlos_status == 'LOS':
                     # 視野角内かつLOS: 緑
@@ -523,8 +521,11 @@ class UWBLocalizerNode(Node):
                         # apply_fov_constraintでnLOSに強制されているので、その情報を使う
                         if nlos_status == 'LOS':
                             pygame.draw.line(map_surface, COLOR_LOS_LINE, robot_px, anchor_px, 1)
-                        else: # nLOS または 視野角外でnLOS扱いになったもの
+                        elif nlos_status == 'nLOS': # nLOS または 視野角外でnLOS扱いになったもの
                             pygame.draw.line(map_surface, COLOR_NLOS_LINE, robot_px, anchor_px, 2)
+                        else:
+                            # データがない場合は何もしない
+                            continue
             
             # --- 画面表示 ---
             screen.fill(COLOR_BACKGROUND)
