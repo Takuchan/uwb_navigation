@@ -103,6 +103,10 @@ class UWBLocalizerNode(Node):
         # 軌跡保存用
         self.path_positions = deque(maxlen=1000)
         self.uwb_positions = deque(maxlen=1000)  # UWB生データ用
+        self.pygame_history = deque(maxlen=2000) 
+
+        self.pygame_thread = threading.Thread(target=self.pygame_visualization, daemon=True)
+        self.pygame_thread.start()
         
         # ROS 2 サブスクライバー（/odomをサブスクライブ）
         self.odom_sub = self.create_subscription(
@@ -171,6 +175,8 @@ class UWBLocalizerNode(Node):
             # 軌跡に追加
             self.path_positions.append(smoothed_pos.copy())
             self.uwb_positions.append(position.copy())  # 生データも保存
+
+            self.pygame_history.append((smoothed_pos.copy(), filtered_data.copy()))
             
             # ROS 2メッセージパブリッシュ
             self.publish_path()
@@ -431,15 +437,21 @@ class UWBLocalizerNode(Node):
         
         self.map_pub.publish(grid)
     
+
     def pygame_visualization(self):
-        """Pygameによるリアルタイム可視化（別スレッド）"""
+        """PygameによるnLOS/LOSマップ可視化（別スレッド）"""
         pygame.init()
-        pygame.display.set_caption("UWB Real-Time Mapper")
+        pygame.display.set_caption("UWB nLOS/LOS Mapper")
         
         # 画面設定
         screen_width = 800
         screen_height = 800
         screen = pygame.display.set_mode((screen_width, screen_height))
+        
+        # マップ描画用のサーフェス（この上に線を描画していく）
+        map_surface = pygame.Surface((screen_width, screen_height))
+        map_surface.fill((255, 255, 255)) # 初期状態は黒
+
         clock = pygame.time.Clock()
         font = pygame.font.Font(None, 24)
         
@@ -453,96 +465,104 @@ class UWBLocalizerNode(Node):
         all_anchor_coords = np.array(anchors)
         min_coords = np.min(all_anchor_coords, axis=0)
         max_coords = np.max(all_anchor_coords, axis=0)
-        world_range = max_coords - min_coords
         
-        scale_x = (screen_width - 2 * padding_px) / world_range[0] if world_range[0] > 0 else 1
-        scale_y = (screen_height - 2 * padding_px) / world_range[1] if world_range[1] > 0 else 1
-        scale = min(scale_x, scale_y) * 0.8  # 少し余裕を持たせる
+        # 描画範囲をアンカー位置にマージンを加えて決定
+        world_min = min_coords - 2.0  # 2mのマージン
+        world_max = max_coords + 2.0  # 2mのマージン
+        world_range = world_max - world_min
+
+        if world_range[0] <= 0 or world_range[1] <= 0:
+            self.get_logger().error("アンカーの座標範囲が不正です。Pygameの座標変換をスキップします。")
+            return
+
+        scale = min((screen_width - 2 * padding_px) / world_range[0], 
+                    (screen_height - 2 * padding_px) / world_range[1])
         
         origin_px = np.array([
-            screen_width/2 - (max_coords[0] + min_coords[0])/2 * scale,
-            screen_height/2 + (max_coords[1] + min_coords[1])/2 * scale
+            padding_px - world_min[0] * scale,
+            screen_height - padding_px + world_min[1] * scale
         ])
-        
+
         def world_to_screen(pos_m):
             screen_pos = origin_px + np.array([pos_m[0], -pos_m[1]]) * scale
             return int(screen_pos[0]), int(screen_pos[1])
         
         # 色定義
-        COLOR_BACKGROUND = (20, 20, 20)
+        COLOR_BACKGROUND = (27, 27, 27)
         COLOR_GRID = (40, 40, 40)
         COLOR_ANCHOR = (255, 0, 0)
-        COLOR_LOS_LINE = (0, 255, 0)
-        COLOR_NLOS_LINE = (255, 100, 0)
-        COLOR_FOV_OUT_LINE = (255, 255, 0)
-        COLOR_UWB_PATH = (0, 150, 255)
-        COLOR_ROBOT = (0, 255, 0)
+        COLOR_LOS_LINE = (100, 100, 100) # 灰色
+        COLOR_NLOS_LINE = (0, 0, 0)      # 黒色
+        COLOR_ROBOT = (0, 255, 255)      # シアン
         COLOR_TEXT = (255, 255, 255)
-        
-        prev_uwb_pos_px = None
-        
+
         running = True
-        while running:
+        while running and rclpy.ok():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
             
-            # 背景
+            # --- マップ描画ロジック ---
+            # self.pygame_historyから最新のデータを取得して描画する
+            # このループで毎回履歴全体を描画すると重くなるため、
+            # 新しく追加された分だけを描画するのが理想だが、簡単のため毎回描画
+            map_surface.fill((27, 27, 27)) # 毎回マップをクリアする場合
+            
+            history_copy = list(self.pygame_history) # 描画中に変更されないようにコピー
+            for robot_pos_hist, uwb_data_hist in history_copy:
+                robot_px = world_to_screen(robot_pos_hist)
+                
+                for i, anchor_pos in enumerate(anchors):
+                    twr_key = f"TWR{i}"
+                    
+                    if twr_key in uwb_data_hist and uwb_data_hist[twr_key] is not None:
+                        nlos_status = uwb_data_hist[twr_key].get('nlos_los', 'nLOS')
+                        anchor_px = world_to_screen(anchor_pos)
+                        
+                        # 視野角内のデータのみ描画
+                        # apply_fov_constraintでnLOSに強制されているので、その情報を使う
+                        if nlos_status == 'LOS':
+                            pygame.draw.line(map_surface, COLOR_LOS_LINE, robot_px, anchor_px, 1)
+                        else: # nLOS または 視野角外でnLOS扱いになったもの
+                            pygame.draw.line(map_surface, COLOR_NLOS_LINE, robot_px, anchor_px, 2)
+            
+            # --- 画面表示 ---
             screen.fill(COLOR_BACKGROUND)
             
-            # グリッド
+            # グリッド描画
             for x in range(0, screen_width, 50):
                 pygame.draw.line(screen, COLOR_GRID, (x, 0), (x, screen_height))
             for y in range(0, screen_height, 50):
                 pygame.draw.line(screen, COLOR_GRID, (0, y), (screen_width, y))
-            
-            # アンカー描画
+
+            # 作成したマップを描画
+            screen.blit(map_surface, (0, 0))
+
+            # アンカーを描画 (マップの上に描画)
             for i, anchor_pos in enumerate(anchors):
                 pos_px = world_to_screen(anchor_pos)
                 pygame.draw.circle(screen, COLOR_ANCHOR, pos_px, 8)
                 text = font.render(f"A{i}", True, COLOR_TEXT)
                 screen.blit(text, (pos_px[0] + 10, pos_px[1] - 10))
-            
-            # ロボット位置
-            if self.robot_position is not None:
-                robot_pos_px = world_to_screen(self.robot_position)
+
+            # 現在のロボット位置を描画
+            if self.last_valid_uwb_position is not None:
+                robot_pos_px = world_to_screen(self.last_valid_uwb_position)
                 pygame.draw.circle(screen, COLOR_ROBOT, robot_pos_px, 6)
                 
                 # ロボットの向き
-                heading_end = self.robot_position + np.array([
+                heading_end = self.last_valid_uwb_position + np.array([
                     math.cos(self.robot_heading) * 0.5,
                     math.sin(self.robot_heading) * 0.5
                 ])
                 heading_end_px = world_to_screen(heading_end)
                 pygame.draw.line(screen, COLOR_ROBOT, robot_pos_px, heading_end_px, 2)
-            
-            # UWB軌跡
-            if len(self.path_positions) > 1:
-                path_points = [world_to_screen(pos) for pos in list(self.path_positions)]
-                if len(path_points) > 1:
-                    pygame.draw.lines(screen, COLOR_UWB_PATH, False, path_points, 2)
-            
-            # 現在のUWB位置
-            if self.last_valid_uwb_position is not None:
-                uwb_pos_px = world_to_screen(self.last_valid_uwb_position)
-                pygame.draw.circle(screen, COLOR_UWB_PATH, uwb_pos_px, 4)
-            
-            # 情報表示
-            info_text = [
-                f"Robot: ({self.robot_position[0]:.2f}, {self.robot_position[1]:.2f})" if self.robot_position is not None else "Robot: N/A",
-                f"Heading: {math.degrees(self.robot_heading):.1f}°",
-                f"UWB: ({self.last_valid_uwb_position[0]:.2f}, {self.last_valid_uwb_position[1]:.2f})" if self.last_valid_uwb_position is not None else "UWB: N/A"
-            ]
-            
-            for i, text in enumerate(info_text):
-                text_surface = font.render(text, True, COLOR_TEXT)
-                screen.blit(text_surface, (10, 10 + i * 25))
-            
+
             pygame.display.flip()
-            clock.tick(30)
+            clock.tick(30) # 30 FPS
         
         pygame.quit()
-    
+
     def destroy_node(self):
         """ノード終了時の処理"""
         if hasattr(self, 'serial_filter'):
