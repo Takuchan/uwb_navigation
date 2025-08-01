@@ -123,7 +123,7 @@ class UWBLocalizerNode(Node):
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         
         # タイマー（メインループ）
-        self.timer = self.create_timer(1.0/self.publish_freq, self.main_loop)
+        self.timer = self.create_timer(0.5/self.publish_freq, self.main_loop)
         
         # アンカーマーカー発行（静的）
         self.publish_anchor_markers()
@@ -442,8 +442,8 @@ class UWBLocalizerNode(Node):
         pygame.display.set_caption("UWB nLOS/LOS Mapper")
         
         # 画面設定
-        screen_width = 800
-        screen_height = 800
+        screen_width = 1300
+        screen_height = 1300
         screen = pygame.display.set_mode((screen_width, screen_height))
         
         # マップ描画用のサーフェス（この上に線を描画していく）
@@ -520,9 +520,9 @@ class UWBLocalizerNode(Node):
                         # 視野角内のデータのみ描画
                         # apply_fov_constraintでnLOSに強制されているので、その情報を使う
                         if nlos_status == 'LOS':
-                            pygame.draw.line(map_surface, COLOR_LOS_LINE, robot_px, anchor_px, 1)
+                            pygame.draw.line(map_surface, COLOR_LOS_LINE, robot_px, anchor_px, 10)
                         elif nlos_status == 'nLOS': # nLOS または 視野角外でnLOS扱いになったもの
-                            pygame.draw.line(map_surface, COLOR_NLOS_LINE, robot_px, anchor_px, 2)
+                            pygame.draw.line(map_surface, COLOR_NLOS_LINE, robot_px, anchor_px, 10)
                         else:
                             # データがない場合は何もしない
                             continue

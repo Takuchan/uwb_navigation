@@ -8,21 +8,21 @@ from launch_ros.actions import Node
 def generate_launch_description():
     
     declare_d01_arg = DeclareLaunchArgument(
-        'd01', default_value='7.12',
+        'd01', default_value='10.15',
         description='0to1のアンカー間距離 [m]'  
     )
     declare_d12_arg = DeclareLaunchArgument(
-        'd12', default_value='1.66',
+        'd12', default_value='5.15',
         description='1to2のアンカー間距離 [m]'
     )
     declare_d02_arg = DeclareLaunchArgument(
-        'd02', default_value='7.12',
+        'd02', default_value='11.06',
         description='0to2のアンカー間距離 [m]'
     )
     
     # シリアルポート設定
     declare_com_port_arg = DeclareLaunchArgument(
-        'com_port', default_value='/dev/ttyUSB0',
+        'com_port', default_value='/dev/ttyUSB1',
         description='UWB通信のためのシリアルポート'
     )
     declare_baud_rate_arg = DeclareLaunchArgument(
