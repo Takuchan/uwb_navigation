@@ -8,15 +8,15 @@ from launch_ros.actions import Node
 def generate_launch_description():
     
     declare_d01_arg = DeclareLaunchArgument(
-        'd01', default_value='10.15',
+        'd01', default_value='11.06',
         description='0to1のアンカー間距離 [m]'  
     )
     declare_d12_arg = DeclareLaunchArgument(
-        'd12', default_value='5.15',
+        'd12', default_value='4.9',
         description='1to2のアンカー間距離 [m]'
     )
     declare_d02_arg = DeclareLaunchArgument(
-        'd02', default_value='11.06',
+        'd02', default_value='10.3',
         description='0to2のアンカー間距離 [m]'
     )
     

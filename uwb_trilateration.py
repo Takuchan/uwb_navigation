@@ -9,7 +9,7 @@ import threading
 from matplotlib.animation import FuncAnimation
 
 class UWBTrilateration:
-    def __init__(self, com_port='COM7', baud_rate=3000000):
+    def __init__(self, com_port='/dev/ttyUSB1', baud_rate=3000000):
         self.com_port = com_port
         self.baud_rate = baud_rate
         self.ser = None
@@ -37,14 +37,14 @@ class UWBTrilateration:
         anchor0 = np.array([0, 0, 0])
         
         # UWB1の距離はUWB0よりも776cm離れている
-        anchor1 = np.array([776, 0, 0])
+        anchor1 = np.array([1015, 0, 0])
         
 
 
         # UWB2(Anchor2)のデータはUWB0とUWB1のデータを使って計算する。余弦定理を利用している。
         # Distance from UWB0: 789cm, Distance from UWB1: 530cm
-        d01 = 1180  # UWB0 to UWB1
-        d02 = 1225  # UWB0 to UWB2
+        d01 = 1015  # UWB0 to UWB1
+        d02 = 1106  # UWB0 to UWB2
         d12 = 525  # UWB1 to UWB2
         
         # UWB2(Anchor)はほかのパラメータのデータを使って行う。余弦定理で求めたcosΘを掛け合わせている。

@@ -127,7 +127,7 @@ class SerialFilter:
         return final_result
     
 if __name__ == "__main__":
-    uwb_filter = SerialFilter(com_port="/dev/ttyUSB0",num_anchors=3)
+    uwb_filter = SerialFilter(com_port="/dev/ttyUSB1",num_anchors=3)
 
     if not uwb_filter.ser or not uwb_filter.ser.is_open:
         print("プログラムを終了します") 
