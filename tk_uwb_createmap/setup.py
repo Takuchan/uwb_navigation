@@ -28,6 +28,7 @@ setup(
     entry_points={
         'console_scripts': [
             'uwb_localizer_node = tk_uwb_createmap.uwb_localizer_node:main',
+            'uwb_mapper = tk_uwb_createmap.uwb_grid_mapper_node:main'
         ],
     },
 )

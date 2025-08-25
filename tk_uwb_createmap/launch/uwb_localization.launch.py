@@ -1,87 +1,34 @@
+# launch/localization.launch.py
+
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    
-    declare_d01_arg = DeclareLaunchArgument(
-        'd01', default_value='11.06',
-        description='0to1のアンカー間距離 [m]'  
-    )
-    declare_d12_arg = DeclareLaunchArgument(
-        'd12', default_value='4.9',
-        description='1to2のアンカー間距離 [m]'
-    )
-    declare_d02_arg = DeclareLaunchArgument(
-        'd02', default_value='10.3',
-        description='0to2のアンカー間距離 [m]'
-    )
-    
-    # シリアルポート設定
-    declare_com_port_arg = DeclareLaunchArgument(
-        'com_port', default_value='/dev/ttyUSB1',
-        description='UWB通信のためのシリアルポート'
-    )
-    declare_baud_rate_arg = DeclareLaunchArgument(
-        'baud_rate', default_value='3000000',
-        description='ボーレート'
+    pkg_share = get_package_share_directory('tk_uwb_createmap') # ★自分のパッケージ名に変更
+
+    # robot_localizationの設定ファイルパス
+    ekf_config_path = os.path.join(pkg_share, 'config/ekf.yaml')
+
+    # UWBマッパーノードの起動設定
+    uwb_mapper_node = Node(
+        package='tk_uwb_createmap', # ★自分のパッケージ名に変更
+        executable='uwb_mapper',     # ★setup.pyで設定した実行可能ファイル名
+        name='uwb_grid_mapper_node',
+        output='screen'
     )
 
-    # UWBタグの位置をロボットのベースリンクからの静的TFとして設定
-    static_tf_tag = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_transform_publisher_tag',
+    # robot_localizationノードの起動設定
+    robot_localization_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
         output='screen',
-        arguments=['0.1', '0.0', '0.2', '0', '0', '0', 'base_footprint', 'uwb_tag']
+        parameters=[ekf_config_path]
     )
-
-    static_tf_map = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_transform_publisher_map',
-        output='screen',
-        arguments=['0.0', '0.0', '0.0', '0', '0', '0', 'map', 'odom']
-    )
-
-
-    # UWBローカライゼーションノード
-    uwb_localizer_node = Node(
-        package='tk_uwb_createmap',
-        executable='uwb_localizer_node',
-        name='uwb_localizer_node',
-        output='screen',
-        parameters=[
-            {
-                # Launch引数で受け取った値をノードのパラメータとして渡す
-                'd01': LaunchConfiguration('d01'),
-                'd12': LaunchConfiguration('d12'),
-                'd02': LaunchConfiguration('d02'),
-                'com_port': LaunchConfiguration('com_port'),
-                'baud_rate': LaunchConfiguration('baud_rate'),
-                'num_anchors': 3,
-                'ekf_dt': 0.1,
-                'fov_angle': 120.0,  # 視野角 [度]
-                'map_frame': 'map',
-                'odom_frame': 'odom',
-                'base_link_frame': 'base_footprint',
-                'uwb_tag_frame': 'uwb_tag',
-                'publish_frequency': 10.0
-            }
-        ]
-    )
-    
 
     return LaunchDescription([
-        declare_d01_arg,
-        declare_d12_arg,
-        declare_d02_arg,
-        declare_com_port_arg,
-        declare_baud_rate_arg,
-        static_tf_tag,
-        static_tf_map,
-        uwb_localizer_node,
+        uwb_mapper_node,
+        robot_localization_node
     ])
