@@ -19,16 +19,16 @@ def generate_launch_description():
         output='screen'
     )
 
-    # robot_localizationノードの起動設定
-    robot_localization_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_config_path]
-    )
+    # # robot_localizationノードの起動設定
+    # robot_localization_node = Node(
+    #     package='robot_localization',
+    #     executable='ekf_node',
+    #     name='ekf_filter_node',
+    #     output='screen',
+    #     parameters=[ekf_config_path]
+    # )
 
     return LaunchDescription([
         uwb_mapper_node,
-        robot_localization_node
+        # robot_localization_node
     ])
