@@ -18,4 +18,4 @@ uwb_localizer_node:
     uwb_tag_frame: "uwb_tag"
     
     # 発行頻度
-    publish_frequency: 10.0
+    publish_frequency: 30

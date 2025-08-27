@@ -1,5 +1,6 @@
 import numpy as np
 import math
+
 class TrilaterationSolver:
 
     def __init__(self,d01:float,d12:float,d02:float):
@@ -49,3 +50,4 @@ class TrilaterationSolver:
         except np.linalg.LinAlgError:
             print("警告: 行列が特異であり、位置を一意に決定できません。")
             return np.array([float('nan'), float('nan')])
+

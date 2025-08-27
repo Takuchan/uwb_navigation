@@ -15,11 +15,10 @@ from nav_msgs.msg import OccupancyGrid
 import tf2_ros
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 
-# 独自モジュール (同じディレクトリにあることを想定)
 from .triliation import TrilaterationSolver
 from .kalman_filter import ExtendedKalmanFilter
-from .serialandFilter import SerialFilter
 from .occupancy_grid_manager import OccupancyGridManager
+from .serialandFilter import SerialFilter
 
 class UWBGridMapperNode(Node):
     """
@@ -35,7 +34,7 @@ class UWBGridMapperNode(Node):
             parameters=[
                 ('d01', 6.12), ('d12', 6.05), ('d02', 6.65),
                 ('com_port', '/dev/ttyUSB1'), ('baud_rate', 3000000), ('num_anchors', 3),
-                ('ekf_dt', 0.1), ('fov_angle_deg', 120.0),
+                ('ekf_dt', 0.1), ('fov_angle_deg', 60.0),
                 ('map.resolution', 0.05), # 5cm/pixel
                 ('map.width_m', 20.0),
                 ('map.height_m', 20.0),
@@ -106,8 +105,9 @@ class UWBGridMapperNode(Node):
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         
         # タイマー
-        self.main_timer = self.create_timer(0.1, self.main_loop) # 10Hz for localization
         self.map_timer = self.create_timer(1.0, self.publish_map) # 1Hz for map publishing
+        self.main_loop_timer = self.create_timer(0.5, self.main_loop) 
+
         
         # 静的マーカーを発行
         self.publish_anchor_markers()
@@ -118,8 +118,9 @@ class UWBGridMapperNode(Node):
         _, _, self.robot_heading = euler_from_quaternion([q.x, q.y, q.z, q.w])
     
     def main_loop(self):
+    
         # 1. UWBデータ取得
-        uwb_data = self.serial_filter.read_anchor_data_snapshot(timeout=0.1)
+        uwb_data = self.serial_filter.read_anchor_data_snapshot(timeout=0.5)
         if not any(uwb_data.values()): return
 
         # 2. 三辺測位
@@ -159,7 +160,6 @@ class UWBGridMapperNode(Node):
         # 5. 可視化情報のパブリッシュ
         self.publish_tf(smoothed_pos)
         self.publish_path()
-        self.publish_connection_markers(uwb_data, smoothed_pos)
 
     def perform_trilateration(self, uwb_data):
             """
@@ -245,7 +245,11 @@ class UWBGridMapperNode(Node):
         for i, anchor_pos in enumerate(self.anchor_positions):
             marker = Marker()
             marker.header.frame_id = "map"
-            marker.ns = "anchors"; marker.id = i; marker.type = Marker.CYLINDER
+            marker.ns = "anchors"; marker.id = i
+            if i == 0:
+                marker.type = Marker.CUBE
+            else:
+                marker.type = Marker.CYLINDER
             marker.action = Marker.ADD
             marker.pose.position.x = float(anchor_pos[0])
             marker.pose.position.y = float(anchor_pos[1])
@@ -254,13 +258,6 @@ class UWBGridMapperNode(Node):
             marker.lifetime.sec = 0 # 永続
             marker_array.markers.append(marker)
         self.anchor_marker_pub.publish(marker_array)
-
-    def publish_connection_markers(self, uwb_data, robot_pos):
-        marker_array = MarkerArray()
-        for i, anchor_pos in enumerate(self.anchor_positions):
-            # ... (マーカーの色分けロジックは元のコードとほぼ同じなので省略可能だが、デバッグに役立つので残す)
-            pass # 必要であれば元のコードからコピー＆ペースト
-        self.connection_marker_pub.publish(marker_array)
 
     def destroy_node(self):
         self.serial_filter.disconnect_serial()

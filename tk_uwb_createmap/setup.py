@@ -15,8 +15,6 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
-
-        
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -27,7 +25,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'uwb_localizer_node = tk_uwb_createmap.uwb_localizer_node:main',
             'uwb_mapper = tk_uwb_createmap.uwb_grid_mapper_node:main'
         ],
     },

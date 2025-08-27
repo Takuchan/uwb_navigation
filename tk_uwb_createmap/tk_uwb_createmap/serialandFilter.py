@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import serial
 import re
 import pprint
+import datetime
 
 class SerialFilter:
     """
@@ -12,7 +13,7 @@ class SerialFilter:
     指定された数のAnchorの情報を取得する。
     """
 
-    def __init__(self, com_port="/dev/ttyUSB0", baud_rate=3000000, num_anchors=3):
+    def __init__(self, com_port="/dev/ttyUSB1", baud_rate=3000000, num_anchors=3):
         """
         Initializes the SerialFilter.
         Args:
@@ -25,6 +26,8 @@ class SerialFilter:
         self.num_anchors = num_anchors # Number of anchors to expect
         self.ser = None
         self.connect_serial()
+
+        self.error_count = 0
 
     def connect_serial(self) -> bool:
         """
@@ -55,7 +58,7 @@ class SerialFilter:
             self.ser.close()
             print(f"🥳{self.com_port}から接続解除しました。")
 
-    def read_anchor_data_snapshot(self, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
+    def read_anchor_data_snapshot(self, timeout: float = 0.5) -> Optional[Dict[str, Any]]:
         if not self.ser or not self.ser.is_open:
             print("エラー: シリアルポートが開いていません。")
             return None
@@ -121,8 +124,9 @@ class SerialFilter:
             else:
                 final_result[anchor_id_str] = None # Mark as None if incomplete or missing
         
+        self.error_count = self.error_count + 1
         if not any(final_result.values()):
-             print("警告：どのアンカーからも完全なデータを取得できませんでした。")
+             print(f"警告{self.error_count}：あどのアンカーからも完全なデータを取得できませんでした。{datetime.datetime.now()}")
 
         return final_result
     
@@ -135,7 +139,7 @@ if __name__ == "__main__":
     try:
         print("😀データ収集を開始する")
         while True:
-            anchor_data = uwb_filter.read_anchor_data_snapshot(timeout=0.15)
+            anchor_data = uwb_filter.read_anchor_data_snapshot(timeout=0.5)
 
             print(f"\n--- {time.ctime()} ---")
             if anchor_data:
