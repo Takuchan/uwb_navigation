@@ -1,6 +1,5 @@
 import time
-from collections import Counter
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Dict, Any, Optional
 import serial
 import re
 import pprint
@@ -25,9 +24,8 @@ class SerialFilter:
         self.baud_rate = baud_rate
         self.num_anchors = num_anchors # Number of anchors to expect
         self.ser = None
-        self.connect_serial()
-
         self.error_count = 0
+        # NOTE: connect_serial is called outside by the ROS node
 
     def connect_serial(self) -> bool:
         """
@@ -37,7 +35,7 @@ class SerialFilter:
             print(f"すでにポート接続しています: {self.com_port}")
             return True
         try:
-            self.ser = serial.Serial(self.com_port, self.baud_rate, timeout=0.1) # Use a short timeout for readline
+            self.ser = serial.Serial(self.com_port, self.baud_rate, timeout=0.1)
             print(f"✅接続できた。{self.com_port} {self.baud_rate}")
             print("一旦、安定化接続中。２秒待て")
             time.sleep(2)
@@ -63,12 +61,9 @@ class SerialFilter:
             print("エラー: シリアルポートが開いていません。")
             return None
 
-        # This dictionary will store data as it comes in.
-        # Format: {0: {data_for_twr0}, 1: {data_for_twr1}, ...}
         collected_data = {}
         required_keys = {"nlos_los", "distance", "horizontal_angle", "elevation_angle"}
         
-        # Regex patterns to capture TWR index and value
         nlos_pattern = re.compile(r'TWR\[(\d+)\]\.nLos\s*:\s*(\d+)')
         distance_pattern = re.compile(r'TWR\[(\d+)\]\.distance\s*:\s*([\d.]+)')
         azimuth_pattern = re.compile(r'TWR\[(\d+)\]\.aoa_azimuth:\s*([-+]?[\d.]+)')
@@ -82,11 +77,9 @@ class SerialFilter:
                     if not line:
                         continue
 
-                    # Try to match each pattern
                     nlos_match = nlos_pattern.search(line)
                     if nlos_match:
                         twr_id = int(nlos_match.group(1))
-                        # Use setdefault to create dict for a new twr_id if it doesn't exist
                         collected_data.setdefault(twr_id, {})["nlos_los"] = "LOS" if int(nlos_match.group(2)) == 0 else "nLOS"
                         continue
 
@@ -115,32 +108,32 @@ class SerialFilter:
                 print(f"データパース中にエラーが発生しました: {e}")
                 continue
         
-        # After timeout, build the final result dictionary
         final_result = {}
         for i in range(self.num_anchors):
             anchor_id_str = f"TWR{i}"
             if i in collected_data and all(key in collected_data[i] for key in required_keys):
                 final_result[anchor_id_str] = collected_data[i]
             else:
-                final_result[anchor_id_str] = None # Mark as None if incomplete or missing
+                final_result[anchor_id_str] = None
         
-        self.error_count = self.error_count + 1
         if not any(final_result.values()):
-             print(f"警告{self.error_count}：あどのアンカーからも完全なデータを取得できませんでした。{datetime.datetime.now()}")
+             self.error_count += 1
+             if self.error_count % 10 == 0: # 10回に1回警告を表示
+                print(f"警告({self.error_count}回目)：どのアンカーからも完全なデータを取得できませんでした。 {datetime.datetime.now()}")
 
         return final_result
-    
-if __name__ == "__main__":
-    uwb_filter = SerialFilter(com_port="/dev/ttyUSB1",num_anchors=3)
 
-    if not uwb_filter.ser or not uwb_filter.ser.is_open:
-        print("プログラムを終了します") 
+# This block is for standalone testing of this module
+if __name__ == "__main__":
+    uwb_filter = SerialFilter(com_port="/dev/ttyUSB0", num_anchors=3)
+    if not uwb_filter.connect_serial():
+        print("プログラムを終了します")
+        exit()
     
     try:
         print("😀データ収集を開始する")
         while True:
             anchor_data = uwb_filter.read_anchor_data_snapshot(timeout=0.5)
-
             print(f"\n--- {time.ctime()} ---")
             if anchor_data:
                 pprint.pprint(anchor_data)
