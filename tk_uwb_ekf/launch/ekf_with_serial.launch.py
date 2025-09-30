@@ -15,7 +15,7 @@ def generate_launch_description():
                 {'com_port': '/dev/ttyUSB1'},
                 {'baud_rate': 3000000},
                 {'num_anchors': 3},
-                {'uwb_timeout': 0.04}, # タイマー周期(0.05s)より少し短く設定
+                {'uwb_timeout': 0.5},
                 
                 # アンカー座標
                 {'anchor_a_pos': [0.0, 5.0]}, # TWR0
