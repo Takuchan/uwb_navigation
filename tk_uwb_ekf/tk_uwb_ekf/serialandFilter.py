@@ -102,7 +102,9 @@ class SerialFilter:
                         twr_id = int(elevation_match.group(1))
                         elevation = float(elevation_match.group(2))
                         collected_data.setdefault(twr_id, {})["elevation_angle"] = round(elevation, 2)
-                        continue
+                        break
+                    
+                    
 
             except Exception as e:
                 print(f"データパース中にエラーが発生しました: {e}")
@@ -125,7 +127,7 @@ class SerialFilter:
 
 # This block is for standalone testing of this module
 if __name__ == "__main__":
-    uwb_filter = SerialFilter(com_port="/dev/ttyUSB0", num_anchors=3)
+    uwb_filter = SerialFilter(com_port="COM7", num_anchors=3)
     if not uwb_filter.connect_serial():
         print("プログラムを終了します")
         exit()
