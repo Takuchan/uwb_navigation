@@ -11,8 +11,8 @@ from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_from_euler
 
 from filterpy.kalman import ExtendedKalmanFilter
+import math 
 
-# ---変更点: SerialFilterクラスをインポート---
 from .serialandFilter import SerialFilter
 
 class UwbEkfNode(Node):
@@ -23,7 +23,7 @@ class UwbEkfNode(Node):
         self.declare_parameter('com_port', '/dev/ttyUSB1')
         self.declare_parameter('baud_rate', 3000000)
         self.declare_parameter('num_anchors', 3)
-        self.declare_parameter('uwb_timeout', 0.1) # UWBデータ読み取りタイムアウト
+        self.declare_parameter('uwb_timeout', 0.05) # UWBデータ読み取りタイムアウト
 
         self.declare_parameter('anchor_a_pos', [0.0, 5.0])
         self.declare_parameter('anchor_b_pos', [5.0, 5.0])
@@ -58,7 +58,7 @@ class UwbEkfNode(Node):
         self.ekf.x = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]]).T
         self.ekf.P = np.diag([1.0, 1.0, np.pi, 1.0, 0.5])
         self.ekf.Q = np.diag([0.01, 0.01, 0.01, 0.1, 0.1])
-        self.R_uwb = np.diag([0.1**2]) 
+        self.R_uwb = np.diag([0.2**2]) 
 
         self.last_time = self.get_clock().now()
         self.latest_odom = None
@@ -107,7 +107,7 @@ class UwbEkfNode(Node):
         F[2, 4] = dt
         return F
 
-    def h_uwb(self, x, anchor_pos):
+    def h_uwb(self, x, anchor_pos): #3平方の定理を行っている。
         dx = x[0, 0] - anchor_pos[0]
         dy = x[1, 0] - anchor_pos[1]
         return np.array([[np.sqrt(dx**2 + dy**2)]])
@@ -120,7 +120,6 @@ class UwbEkfNode(Node):
         H = np.zeros((1, 5)); H[0, 0] = dx / dist; H[0, 1] = dy / dist
         return H
 
-    # --- メインループ ---
     def timer_callback(self):
         current_time = self.get_clock().now()
         dt = (current_time - self.last_time).nanoseconds / 1e9
@@ -129,31 +128,23 @@ class UwbEkfNode(Node):
         if dt <= 0:
             return
 
-        # --- 予測(Predict)ステップ ---
         if self.latest_odom:
             self.ekf.x[3,0] = self.latest_odom.twist.twist.linear.x
             self.ekf.x[4,0] = self.latest_odom.twist.twist.angular.z
         
-        # ヤコビ行列Fを現在の状態で計算
         F = self.state_transition_jacobian(self.ekf.x, dt)
         
-        # --- エラー修正箇所 ---
-        # predict()メソッドは線形モデル用のため、非線形モデルの予測は手動で行う
-        # 1. 共分散を予測: P = F @ P @ F.T + Q
         self.ekf.P = F @ self.ekf.P @ F.T + self.ekf.Q
-        # 2. 状態を予測: x = f(x)
-        self.ekf.x = self.state_transition_function(self.ekf.x, dt)
+        self.ekf.x = self.state_transition_function(self.ekf.x, dt) # ホイールお度目取りの情報をもとに、「次はここにいるはずだ」という計算だけが行われる。
 
-        # ---UWBデータをシリアルから読み取り、更新(Update)ステップを実行---
         anchor_data = self.uwb_reader.read_anchor_data_snapshot(timeout=self.uwb_timeout)
-
+        
+        # ここでAnchorData取得できたら！！！
         if anchor_data:
             for twr_id_str, data in anchor_data.items():
                 if data: # データがNoneでないか確認
-                    # 'TWR0'から数字の0を抽出
                     twr_index = int(twr_id_str.replace('TWR', '')) 
                     
-                    # nLOSでない場合のみ更新
                     if data['nlos_los'] == 'LOS':
                         anchor_id = self.anchor_map.get(twr_index)
                         if anchor_id:
@@ -169,10 +160,10 @@ class UwbEkfNode(Node):
         
     def publish_odometry(self, current_time):
         odom_msg = Odometry()
-        odom_msg.header.stamp = current_time.to_msg(); odom_msg.header.frame_id = 'map'; odom_msg.child_frame_id = 'base_link'
+        odom_msg.header.stamp = current_time.to_msg(); odom_msg.header.frame_id = 'map'; odom_msg.child_frame_id = 'base_footprint'
         x, y, theta = self.ekf.x[0,0], self.ekf.x[1,0], self.ekf.x[2,0]
         odom_msg.pose.pose.position.x = x; odom_msg.pose.pose.position.y = y
-        q = quaternion_from_euler(0, 0, theta)
+        q = quaternion_from_euler(0, 0, theta - math.pi / 2)
         odom_msg.pose.pose.orientation.x = q[0]; odom_msg.pose.pose.orientation.y = q[1]; odom_msg.pose.pose.orientation.z = q[2]; odom_msg.pose.pose.orientation.w = q[3]
         odom_msg.pose.covariance = np.zeros(36)
         P_pose = self.ekf.P[0:3, 0:3]; indices = [0, 1, 5]
@@ -186,7 +177,7 @@ class UwbEkfNode(Node):
         t.header.stamp = current_time.to_msg(); t.header.frame_id = 'map'; t.child_frame_id = 'base_link'
         x, y, theta = self.ekf.x[0,0], self.ekf.x[1,0], self.ekf.x[2,0]
         t.transform.translation.x = x; t.transform.translation.y = y; t.transform.translation.z = 0.0
-        q = quaternion_from_euler(0, 0, theta)
+        q = quaternion_from_euler(0, 0, theta - math.pi / 2)
         t.transform.rotation.x = q[0]; t.transform.rotation.y = q[1]; t.transform.rotation.z = q[2]; t.transform.rotation.w = q[3]
         self.tf_broadcaster.sendTransform(t)
 
@@ -203,4 +194,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-

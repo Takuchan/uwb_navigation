@@ -56,7 +56,7 @@ class SerialFilter:
             self.ser.close()
             print(f"🥳{self.com_port}から接続解除しました。")
 
-    def read_anchor_data_snapshot(self, timeout: float = 0.5) -> Optional[Dict[str, Any]]:
+    def read_anchor_data_snapshot(self, timeout: float = 0.05) -> Optional[Dict[str, Any]]:
         if not self.ser or not self.ser.is_open:
             print("エラー: シリアルポートが開いていません。")
             return None
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     try:
         print("😀データ収集を開始する")
         while True:
-            anchor_data = uwb_filter.read_anchor_data_snapshot(timeout=0.5)
+            anchor_data = uwb_filter.read_anchor_data_snapshot(timeout=0.05)
             print(f"\n--- {time.ctime()} ---")
             if anchor_data:
                 pprint.pprint(anchor_data)
