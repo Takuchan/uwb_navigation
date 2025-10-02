@@ -103,8 +103,6 @@ class SerialFilter:
                         elevation = float(elevation_match.group(2))
                         collected_data.setdefault(twr_id, {})["elevation_angle"] = round(elevation, 2)
                         continue
-                    
-                    
 
             except Exception as e:
                 print(f"データパース中にエラーが発生しました: {e}")
