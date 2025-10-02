@@ -160,10 +160,10 @@ class UwbEkfNode(Node):
         
     def publish_odometry(self, current_time):
         odom_msg = Odometry()
-        odom_msg.header.stamp = current_time.to_msg(); odom_msg.header.frame_id = 'map'; odom_msg.child_frame_id = 'base_footprint'
+        odom_msg.header.stamp = current_time.to_msg(); odom_msg.header.frame_id = 'map'; odom_msg.child_frame_id = 'base_link'
         x, y, theta = self.ekf.x[0,0], self.ekf.x[1,0], self.ekf.x[2,0]
         odom_msg.pose.pose.position.x = x; odom_msg.pose.pose.position.y = y
-        q = quaternion_from_euler(0, 0, theta - math.pi / 2)
+        q = quaternion_from_euler(0, 0, theta)
         odom_msg.pose.pose.orientation.x = q[0]; odom_msg.pose.pose.orientation.y = q[1]; odom_msg.pose.pose.orientation.z = q[2]; odom_msg.pose.pose.orientation.w = q[3]
         odom_msg.pose.covariance = np.zeros(36)
         P_pose = self.ekf.P[0:3, 0:3]; indices = [0, 1, 5]
