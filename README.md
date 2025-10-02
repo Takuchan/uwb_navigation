@@ -2,6 +2,8 @@
 
 This system performs real-time 3D positioning using UWB (Ultra-Wideband) technology with three fixed anchor points.
 
+メインで編集しているのは、`tk_uwb_ekf` フォルダー
+
 # 実行の順番（俺用）
 ## ①台車とシリアル通信をするため
 ```:bash
