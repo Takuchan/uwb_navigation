@@ -2,6 +2,26 @@
 
 This system performs real-time 3D positioning using UWB (Ultra-Wideband) technology with three fixed anchor points.
 
+# 実行の順番（俺用）
+## ①台車とシリアル通信をするため
+```:bash
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -v4
+```
+
+## ②ホイールOdometryを発行するため。
+```:bash
+ros2 launch megarover3_bringup robot.launch.py
+```
+
+##  ③IMUを利用するため。
+```:bash
+ros2 launch livox_ros_driver2 msg_MID360_launch.py
+```
+## ④EKF
+```:bash
+ros2 launch tk_uwb_ekf ekf_with_serial.launch.py
+```
+
 ## Features
 
 - Real-time serial data acquisition from UWB device
