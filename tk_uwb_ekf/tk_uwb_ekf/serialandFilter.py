@@ -56,7 +56,7 @@ class SerialFilter:
             self.ser.close()
             print(f"🥳{self.com_port}から接続解除しました。")
 
-    def read_anchor_data_snapshot(self, timeout: float = 0.5) -> Optional[Dict[str, Any]]:
+    def read_anchor_data_snapshot(self, timeout: float = 0.05) -> Optional[Dict[str, Any]]:
         if not self.ser or not self.ser.is_open:
             print("エラー: シリアルポートが開いていません。")
             return None
@@ -102,7 +102,7 @@ class SerialFilter:
                         twr_id = int(elevation_match.group(1))
                         elevation = float(elevation_match.group(2))
                         collected_data.setdefault(twr_id, {})["elevation_angle"] = round(elevation, 2)
-                        break
+                        continue
                     
                     
 
@@ -127,7 +127,7 @@ class SerialFilter:
 
 # This block is for standalone testing of this module
 if __name__ == "__main__":
-    uwb_filter = SerialFilter(com_port="COM7", num_anchors=3)
+    uwb_filter = SerialFilter(com_port="/dev/ttyUSB0", num_anchors=3)
     if not uwb_filter.connect_serial():
         print("プログラムを終了します")
         exit()
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     try:
         print("😀データ収集を開始する")
         while True:
-            anchor_data = uwb_filter.read_anchor_data_snapshot(timeout=0.5)
+            anchor_data = uwb_filter.read_anchor_data_snapshot(timeout=0.05)
             print(f"\n--- {time.ctime()} ---")
             if anchor_data:
                 pprint.pprint(anchor_data)
