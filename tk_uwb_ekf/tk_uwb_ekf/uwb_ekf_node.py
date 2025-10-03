@@ -160,7 +160,7 @@ class UwbEkfNode(Node):
         
     def publish_odometry(self, current_time):
         odom_msg = Odometry()
-        odom_msg.header.stamp = current_time.to_msg(); odom_msg.header.frame_id = 'map'; odom_msg.child_frame_id = 'base_link'
+        odom_msg.header.stamp = current_time.to_msg(); odom_msg.header.frame_id = 'map'; odom_msg.child_frame_id = 'odom'
         x, y, theta = self.ekf.x[0,0], self.ekf.x[1,0], self.ekf.x[2,0]
         odom_msg.pose.pose.position.x = x; odom_msg.pose.pose.position.y = y
         q = quaternion_from_euler(0, 0, theta)
@@ -174,10 +174,10 @@ class UwbEkfNode(Node):
         
     def publish_tf(self, current_time):
         t = TransformStamped()
-        t.header.stamp = current_time.to_msg(); t.header.frame_id = 'map'; t.child_frame_id = 'base_link'
+        t.header.stamp = current_time.to_msg(); t.header.frame_id = 'map'; t.child_frame_id = 'odom'
         x, y, theta = self.ekf.x[0,0], self.ekf.x[1,0], self.ekf.x[2,0]
         t.transform.translation.x = x; t.transform.translation.y = y; t.transform.translation.z = 0.0
-        q = quaternion_from_euler(0, 0, theta - math.pi / 2)
+        q = quaternion_from_euler(0, 0, theta)
         t.transform.rotation.x = q[0]; t.transform.rotation.y = q[1]; t.transform.rotation.z = q[2]; t.transform.rotation.w = q[3]
         self.tf_broadcaster.sendTransform(t)
 
