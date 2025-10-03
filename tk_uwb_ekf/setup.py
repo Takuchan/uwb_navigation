@@ -13,8 +13,11 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        # Launchファイルをインストール対象に追加
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name,'param'), [f'param/anchors.yaml']),  
+        (os.path.join('share', package_name,'param'), [f'param/nav2_params_uwb.yaml']),  
+        (os.path.join('share', package_name,'maps'), [f'maps/map.yaml']),  
+        (os.path.join('share', package_name,'maps'), [f'maps/map.pgm']),  
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,11 +26,11 @@ setup(
     description='UWB EKF localization package',
     license='TODO: License declaration',
     tests_require=['pytest'],
-    # console_scriptsに実行可能ファイルを登録
     entry_points={
         'console_scripts': [
             # '実行可能ファイル名 = パッケージ名.スクリプト名:main'
             'uwb_ekf_node = tk_uwb_ekf.uwb_ekf_node:main',
+            'rviz_anchor_place = tk_uwb_ekf.rviz_anchor_place:main' 
         ],
     },
 )
