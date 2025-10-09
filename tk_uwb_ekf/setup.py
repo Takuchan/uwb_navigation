@@ -28,9 +28,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            # '実行可能ファイル名 = パッケージ名.スクリプト名:main'
             'uwb_ekf_node = tk_uwb_ekf.uwb_ekf_node:main',
-            'rviz_anchor_place = tk_uwb_ekf.rviz_anchor_place:main' 
+            'rviz_anchor_place = tk_uwb_ekf.rviz_anchor_place:main',
+            'serialAndFliterPublisher = tk_uwb_ekf.serialAndFliterPublisher:main'
         ],
     },
 )
