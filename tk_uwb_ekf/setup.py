@@ -16,6 +16,8 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name,'param'), [f'param/anchors.yaml']),  
         (os.path.join('share', package_name,'param'), [f'param/nav2_params_uwb.yaml']),  
+        (os.path.join('share', package_name,'param'), [f'param/nav2_params_kachaka_amcl_uwb.yaml']),  
+        (os.path.join('share', package_name,'param'), [f'param/nav2_params_kachaka_uwb.yaml']),  
         (os.path.join('share', package_name,'maps'), [f'maps/map.yaml']),  
         (os.path.join('share', package_name,'maps'), [f'maps/map.pgm']),  
     ],
