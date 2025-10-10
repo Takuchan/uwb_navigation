@@ -4,16 +4,17 @@ from rclpy.node import Node
 import numpy as np
 import sys
 
+import json
+
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import TransformStamped
+from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_from_euler
 
 from filterpy.kalman import ExtendedKalmanFilter
 import math 
-
-from .serialandFilter import SerialFilter
 
 class UwbEkfNode(Node):
     def __init__(self):
@@ -28,13 +29,7 @@ class UwbEkfNode(Node):
         self.declare_parameter('anchor_a_pos', [0.0, 5.0])
         self.declare_parameter('anchor_b_pos', [5.0, 5.0])
         self.declare_parameter('anchor_c_pos', [2.5, 0.0])
-        
-        # ---変更点: パラメータを取得---
-        com_port = self.get_parameter('com_port').get_parameter_value().string_value
-        baud_rate = self.get_parameter('baud_rate').get_parameter_value().integer_value
-        num_anchors = self.get_parameter('num_anchors').get_parameter_value().integer_value
-        self.uwb_timeout = self.get_parameter('uwb_timeout').get_parameter_value().double_value
-        
+
         # アンカーの座標をパラメータから取得
         # TWR0 -> a, TWR1 -> b, ... のようにマッピング
         self.anchor_positions = {
@@ -44,14 +39,6 @@ class UwbEkfNode(Node):
         }
         self.anchor_map = {0: 'a', 1: 'b', 2: 'c'}
         self.get_logger().info(f"Anchor positions: {self.anchor_positions}")
-
-        # ---変更点: SerialFilterをインスタンス化し、接続---
-        self.uwb_reader = SerialFilter(com_port, baud_rate, num_anchors)
-        if not self.uwb_reader.connect_serial():
-            self.get_logger().error("シリアルポートへの接続に失敗しました。ノードを終了します。")
-            # rclpy.shutdown()を直接呼ぶのは推奨されないため、タイマーを止めるなどして終了を促す
-            # ここではシンプルにsys.exit()を使用（本来はよりクリーンな終了処理が望ましい）
-            sys.exit(1)
 
         # --- EKFの初期設定 (変更なし) ---
         self.ekf = ExtendedKalmanFilter(dim_x=5, dim_z=1)
@@ -63,10 +50,14 @@ class UwbEkfNode(Node):
         self.last_time = self.get_clock().now()
         self.latest_odom = None
         self.latest_imu = None
+        self.latest_uwb_data = None
+
 
         # Subscribers (UWB関連は削除)
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.imu_sub = self.create_subscription(Imu, '/imu/data', self.imu_callback, 10)
+
+        self.uwb_sub = self.create_subscription(String,'/uwb_data_json',self.uwb_callback,10)
 
         # Publishers
         self.filtered_odom_pub = self.create_publisher(Odometry, '/odometry/filtered', 10)
@@ -88,6 +79,17 @@ class UwbEkfNode(Node):
     def imu_callback(self, msg):
         self.latest_imu = msg
         
+
+    def uwb_callback(self,msg):
+        """
+        /uwb_data_jsonのトピックからJSON文字列を受取、字処理に変換して保持する
+        """
+        try:
+            self.latest_uwb_data = json.loads(msg.data)
+        except json.JSONDecodeError as e:
+            self.get_logger().error(f"UWBデータのJSONのパースに失敗しました。: {e}")
+        
+
     # --- EKFの計算モデル (変更なし) ---
     def state_transition_function(self, x, dt):
         x_new = np.copy(x)
@@ -137,7 +139,7 @@ class UwbEkfNode(Node):
         self.ekf.P = F @ self.ekf.P @ F.T + self.ekf.Q
         self.ekf.x = self.state_transition_function(self.ekf.x, dt) # ホイールお度目取りの情報をもとに、「次はここにいるはずだ」という計算だけが行われる。
 
-        anchor_data = self.uwb_reader.read_anchor_data_snapshot(timeout=self.uwb_timeout)
+        anchor_data = self.latest_uwb_data
         
         # ここでAnchorData取得できたら！！！
         if anchor_data:
