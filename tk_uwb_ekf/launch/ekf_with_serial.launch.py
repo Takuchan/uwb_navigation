@@ -30,7 +30,6 @@ def generate_launch_description():
             
         final_anchor_positions = anchor_params
     
-
     else:
         # ファイルが存在しない場合
         num_anchors = 3 # デフォルト値
@@ -53,7 +52,22 @@ def generate_launch_description():
             final_anchor_positions 
         ]
     )
+    
+    # serialAndFliterPublisher ノードの定義を追加
+    serial_publisher_node = Node(
+        package='tk_uwb_ekf',
+        executable='serialAndFliterPublisher',
+        name='serialAndFliterPublisher',
+        output='screen',
+        emulate_tty=True,
+        parameters=[
+            {'com_port': '/dev/ttyUSB1'},
+            {'baud_rate': 3000000},
+            {'uwb_timeout': 0.05}
+        ]
+    )
 
     return LaunchDescription([
-        uwb_ekf_node
+        uwb_ekf_node,
+        serial_publisher_node # 新しいノードを LaunchDescription に追加
     ])
