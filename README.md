@@ -12,5 +12,7 @@ UWBで自己位置推定を行い、そのデータを使ってNav2でナビゲ�
 ```:bash
 ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -v4
 ros2 launch megarover3_bringup robot.launch.py
+ros2 launch oc_megarover_bringup bringup.launch.py
+ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom
 ros2 launch livox_ros_driver2 msg_MID360_launch.py
 ros2 launch tk_uwb_ekf ekf_with_serial.launch.py
