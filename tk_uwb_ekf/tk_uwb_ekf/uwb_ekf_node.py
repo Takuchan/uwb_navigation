@@ -4,7 +4,7 @@ from rclpy.node import Node
 import numpy as np
 import sys
 import json
-from collections import deque # <<< 変更点: dequeを追加
+from collections import deque
 
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
@@ -20,24 +20,21 @@ class UwbEkfNode(Node):
     def __init__(self):
         super().__init__('uwb_ekf_node')
 
-        self.declare_parameter('com_port', '/dev/ttyUSB0')
+        # (パラメータ宣言は変更なし)
+        self.declare_parameter('com_port', '/dev/ttyUSB1')
         self.declare_parameter('baud_rate', 3000000)
         self.declare_parameter('num_anchors', 3)
         self.declare_parameter('uwb_timeout', 0.05)
-
         self.declare_parameter('anchor_a_pos', [0.0, 5.0])
         self.declare_parameter('anchor_b_pos', [5.0, 5.0])
         self.declare_parameter('anchor_c_pos', [2.5, 0.0])
-
-        ### <<< 変更点: nLOSデータフィルタリング用のパラメータを追加 >>>
-        self.declare_parameter('nlos_history_size', 5) # 距離データの履歴を保持する数
-        self.declare_parameter('nlos_variance_threshold', 0.05) # nLOSデータを使用するかの判断に使う分散のしきい値 (標準偏差で約0.22m)
-        self.declare_parameter('R_nlos_multiplier', 4.0) # nLOSデータを使う際のR値の倍率 (信頼度を下げる)
+        self.declare_parameter('nlos_history_size', 5)
+        self.declare_parameter('nlos_variance_threshold', 0.05)
+        self.declare_parameter('R_nlos_multiplier', 4.0)
 
         self.nlos_history_size = self.get_parameter('nlos_history_size').get_parameter_value().integer_value
         self.nlos_variance_threshold = self.get_parameter('nlos_variance_threshold').get_parameter_value().double_value
         self.R_nlos_multiplier = self.get_parameter('R_nlos_multiplier').get_parameter_value().double_value
-        ### <<< ここまで >>>
 
         self.anchor_positions = {
             'a': self.get_parameter('anchor_a_pos').get_parameter_value().double_array_value,
@@ -50,26 +47,28 @@ class UwbEkfNode(Node):
         self.ekf = ExtendedKalmanFilter(dim_x=5, dim_z=1)
         self.ekf.x = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]]).T
         self.ekf.P = np.diag([1.0, 1.0, np.pi, 1.0, 0.5])
-        self.ekf.Q = np.diag([0.01, 0.01, 0.01, 0.1, 0.1])
-        self.R_uwb = np.diag([0.1**2]) 
+        
+        # <<< 変更点1: プロセスノイズQを小さくして、オドメトリの予測をより信頼する >>>
+        # 速度と角速度の不確かさを半分にし、予測モデルの信頼性を上げる
+        self.ekf.Q = np.diag([0.01, 0.01, 0.01, 0.05, 0.05])
+
+        # <<< 変更点2: 観測ノイズRを大きくして、UWB測定値の影響を緩やかにする >>>
+        # UWBの標準偏差を30cmと仮定し、急激な位置補正を抑制する (0.1**2 -> 0.3**2)
+        self.R_uwb = np.diag([0.3**2]) 
 
         self.last_time = self.get_clock().now()
         self.latest_odom = None
-        self.latest_imu = None
         self.latest_uwb_data = None
-
-        ### <<< 変更点: アンカーごとの距離データ履歴を保持する辞書 >>>
         self.distance_history = {twr_id: deque(maxlen=self.nlos_history_size) for twr_id in self.anchor_map.keys()}
-        ### <<< ここまで >>>
 
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.uwb_sub = self.create_subscription(String,'/uwb_data_json',self.uwb_callback,10)
-
         self.filtered_odom_pub = self.create_publisher(Odometry, '/odometry/filtered', 10)
         self.tf_broadcaster = TransformBroadcaster(self)
-
         self.timer = self.create_timer(0.05, self.timer_callback)
-
+    
+    # (以降のコードは変更なし)
+    
     def destroy_node(self):
         self.get_logger().info("ノードをシャットダウンします。")
         super().destroy_node()
@@ -138,33 +137,25 @@ class UwbEkfNode(Node):
 
                 twr_index = int(twr_id_str.replace('TWR', ''))
                 
-                # --- 変更点: 距離データを履歴に追加 ---
                 self.distance_history[twr_index].append(data['distance'])
                 
                 use_data = False
-                # デフォルトはLOSと同じ信頼度
                 current_R = self.R_uwb
 
                 if data['nlos_los'] == 'LOS':
-                    use_data = True # LOSは常に信用する
+                    use_data = True
                 
                 elif data['nlos_los'] == 'nLOS':
-                    # 履歴が十分に溜まっているか確認
                     if len(self.distance_history[twr_index]) == self.nlos_history_size:
-                        # 分散を計算
                         variance = np.var(self.distance_history[twr_index])
                         
-                        # 分散がしきい値以下ならデータを使用
                         if variance < self.nlos_variance_threshold:
                             use_data = True
-                            # nLOSなので、信頼度を下げてRを大きくする
                             current_R = self.R_uwb * self.R_nlos_multiplier
                             self.get_logger().info(f"Using stable nLOS data from TWR{twr_index} (variance: {variance:.4f})")
                         else:
-                            # データが不安定なので使用しない
                             self.get_logger().warning(f"Skipping unstable nLOS data from TWR{twr_index} (variance: {variance:.4f})")
                 
-                # データを使用すると判断された場合のみEKFを更新
                 if use_data:
                     anchor_id = self.anchor_map.get(twr_index)
                     if anchor_id:
@@ -219,46 +210,31 @@ class UwbEkfNode(Node):
         t.header.stamp = current_time.to_msg()
         t.header.frame_id = 'map'
         t.child_frame_id = 'odom'
-        
         map_x, map_y, map_theta = self.ekf.x[0,0], self.ekf.x[1,0], self.ekf.x[2,0]
-        
         odom_x, odom_y, odom_theta = 0.0, 0.0, 0.0
         if self.latest_odom:
             odom_x = self.latest_odom.pose.pose.position.x
             odom_y = self.latest_odom.pose.pose.position.y
             q = self.latest_odom.pose.pose.orientation
             _, _, odom_theta = self.quaternion_to_euler(q.x, q.y, q.z, q.w)
-        
         cos_map_theta = np.cos(map_theta)
         sin_map_theta = np.sin(map_theta)
         cos_odom_theta = np.cos(odom_theta)
         sin_odom_theta = np.sin(odom_theta)
-
-        # map_T_base = pose of base_footprint in map frame (from EKF)
-        # odom_T_base = pose of base_footprint in odom frame (from wheel odometry)
-        # We want to find map_T_odom, which satisfies: map_T_base = map_T_odom * odom_T_base
-        # Therefore, map_T_odom = map_T_base * inverse(odom_T_base)
-        
-        # Inverse of odom_T_base transformation
         inv_odom_x = -odom_x * cos_odom_theta - odom_y * sin_odom_theta
         inv_odom_y =  odom_x * sin_odom_theta - odom_y * cos_odom_theta
         inv_odom_theta = -odom_theta
-
-        # Combine transformations: map_T_odom = map_T_base * inv_odom_T_base
         transform_x = map_x + (inv_odom_x * cos_map_theta - inv_odom_y * sin_map_theta)
         transform_y = map_y + (inv_odom_x * sin_map_theta + inv_odom_y * cos_map_theta)
         transform_theta = map_theta + inv_odom_theta
-        
         t.transform.translation.x = transform_x
         t.transform.translation.y = transform_y
         t.transform.translation.z = 0.0
-        
         q = quaternion_from_euler(0, 0, transform_theta)
         t.transform.rotation.x = q[0]
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
-        
         self.tf_broadcaster.sendTransform(t)
 
 def main(args=None):
@@ -269,7 +245,6 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        # destroy_node()は自動で呼ばれる
         rclpy.shutdown()
 
 if __name__ == '__main__':
