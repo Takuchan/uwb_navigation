@@ -44,7 +44,7 @@ def generate_launch_description():
         output='screen',
         emulate_tty=True,
         parameters=[
-            {'com_port': '/dev/ttyUSB1'},
+            {'com_port': '/dev/ttyUSB0'},
             {'baud_rate': 3000000},
             {'uwb_timeout': 0.05},
             {'num_anchors': num_anchors},
@@ -61,7 +61,7 @@ def generate_launch_description():
         output='screen',
         emulate_tty=True,
         parameters=[
-            {'com_port': '/dev/ttyUSB1'},
+            {'com_port': '/dev/ttyUSB0'},
             {'baud_rate': 3000000},
             {'uwb_timeout': 0.05}
         ]
