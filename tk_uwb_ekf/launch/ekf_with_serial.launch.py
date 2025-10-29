@@ -67,7 +67,21 @@ def generate_launch_description():
         ]
     )
 
+    # uwb_divergence_correction ノードの定義を追加
+    uwb_divergence_correction_node = Node(
+        package='tk_uwb_ekf',
+        executable='uwb_divergence_correction',
+        name='uwb_divergence_correction',
+        output='screen',
+        emulate_tty=True,
+        parameters=[
+            {'history_size': 5},
+            {'variance_threshold': 0.05}
+        ]
+    )
+
     return LaunchDescription([
         uwb_ekf_node,
-        serial_publisher_node # 新しいノードを LaunchDescription に追加
+        serial_publisher_node, # シリアルポートから生データを読み取るノード
+        uwb_divergence_correction_node # UWBデータの揺れを補正するノード
     ])

@@ -42,8 +42,8 @@ class UWBPublisherNode(Node):
             raise ConnectionError("Failed to connect to the serial port.")
 
         # パブリッシャーの作成
-        # トピック名: 'uwb_data_json', メッセージ型: String, キューサイズ: 10
-        self.publisher_ = self.create_publisher(String, 'uwb_data_json', 10)
+        # トピック名: 'uwb_data_raw', メッセージ型: String, キューサイズ: 10
+        self.publisher_ = self.create_publisher(String, 'uwb_data_raw', 10)
 
         # タイマーの作成（指定した周期でコールバック関数を実行）
         timer_period = 1.0 / publish_rate  # seconds

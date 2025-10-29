@@ -4,7 +4,6 @@ from rclpy.node import Node
 import numpy as np
 import sys
 import json
-from collections import deque
 
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
@@ -25,16 +24,12 @@ class UwbEkfNode(Node):
         self.declare_parameter('anchor_b_pos', [5.0, 5.0])
         self.declare_parameter('anchor_c_pos', [2.5, 0.0])
         
-        # UWBデータフィルタリング用パラメータ
-        self.declare_parameter('history_size', 5)
-        self.declare_parameter('variance_threshold', 0.05) # <<< 変更: nlos_を削除し、全データに適用
+        # UWBデータ信頼度パラメータ
         self.declare_parameter('R_nlos_multiplier', 4.0)
         
         self.declare_parameter('stationary_velocity_threshold', 0.02) # 停止とみなす速度のしきい値 (m/s, rad/s)
         self.declare_parameter('R_stationary_multiplier', 10.0) # 停止時にRを何倍にするか
 
-        self.history_size = self.get_parameter('history_size').get_parameter_value().integer_value
-        self.variance_threshold = self.get_parameter('variance_threshold').get_parameter_value().double_value
         self.R_nlos_multiplier = self.get_parameter('R_nlos_multiplier').get_parameter_value().double_value
         self.stationary_velocity_threshold = self.get_parameter('stationary_velocity_threshold').get_parameter_value().double_value
         self.R_stationary_multiplier = self.get_parameter('R_stationary_multiplier').get_parameter_value().double_value
@@ -58,7 +53,6 @@ class UwbEkfNode(Node):
         self.last_time = self.get_clock().now()
         self.latest_odom = None
         self.latest_uwb_data = None
-        self.distance_history = {twr_id: deque(maxlen=self.history_size) for twr_id in self.anchor_map.keys()}
 
         # ROS通信設定
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
@@ -140,17 +134,6 @@ class UwbEkfNode(Node):
                 if not data: continue
 
                 twr_index = int(twr_id_str.replace('TWR', ''))
-                
-                self.distance_history[twr_index].append(data['distance'])
-                
-                # 履歴が溜まるまではフィルタしない
-                if len(self.distance_history[twr_index]) < self.history_size:
-                    continue 
-
-                variance = np.var(self.distance_history[twr_index])
-                if variance > self.variance_threshold:
-                    self.get_logger().warning(f"❌データ不採用 [不安定] from TWR{twr_index} (variance: {variance:.4f})")
-                    continue # 分散が大きすぎるので、このデータは使わない
 
                 current_R = self.R_uwb
 
