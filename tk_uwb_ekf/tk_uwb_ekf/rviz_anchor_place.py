@@ -15,11 +15,17 @@ class RvizAnchorPlacer(Node):
         # ROSパラメータの宣言と取得
         self.declare_parameter('num_anchors', 3)
         self.declare_parameter('save_path', 'anchors.yaml')
+        self.declare_parameter('anchor_height', 0.0)  # Anchor height from ground
+        self.declare_parameter('tag_height', 0.0)  # Tag height from ground
+        
         self.num_anchors = self.get_parameter('num_anchors').get_parameter_value().integer_value
         self.save_path = self.get_parameter('save_path').get_parameter_value().string_value
+        self.anchor_height = self.get_parameter('anchor_height').get_parameter_value().double_value
+        self.tag_height = self.get_parameter('tag_height').get_parameter_value().double_value
         
         self.anchors = []
         self.lock = threading.Lock()
+        self.min_anchors = 3  # 最小アンカー数
 
         # RVizの /clicked_point トピックを購読
         self.subscription = self.create_subscription(
@@ -90,7 +96,11 @@ class RvizAnchorPlacer(Node):
                 messagebox.showwarning("Warning", f"Please place exactly {self.num_anchors} anchors before saving.")
                 return
             
-            output_data = {'anchors': []}
+            output_data = {
+                'anchors': [],
+                'anchor_height': self.anchor_height,
+                'tag_height': self.tag_height
+            }
             for i, anchor in enumerate(self.anchors):
                 output_data['anchors'].append({
                     'name': f'A{i}',
@@ -112,14 +122,53 @@ class RvizAnchorPlacer(Node):
             self.get_logger().info("Anchor positions have been reset.")
             self.anchors.clear()
             self.publish_markers() # マーカーを消去
+    
+    def increase_anchors(self):
+        with self.lock:
+            self.num_anchors += 1
+            self.get_logger().info(f"Number of anchors increased to {self.num_anchors}")
+    
+    def decrease_anchors(self):
+        with self.lock:
+            if self.num_anchors > self.min_anchors:
+                self.num_anchors -= 1
+                # 配置済みアンカーが多すぎる場合は削除
+                if len(self.anchors) > self.num_anchors:
+                    removed = self.anchors.pop()
+                    self.get_logger().info(f"Removed anchor at ({removed['x']:.2f}, {removed['y']:.2f})")
+                    self.publish_markers()
+                self.get_logger().info(f"Number of anchors decreased to {self.num_anchors}")
+            else:
+                self.get_logger().warn(f"Cannot decrease below minimum of {self.min_anchors} anchors")
 
     def run_gui(self):
         root = tk.Tk()
         root.title("Anchor Setter")
 
+        # ステータス表示
         status_label = tk.Label(root, text="Initializing...", font=("Helvetica", 12), width=40)
         status_label.pack(pady=10, padx=10)
 
+        # アンカー数調整フレーム
+        anchor_count_frame = tk.Frame(root)
+        anchor_count_frame.pack(pady=5)
+        
+        tk.Label(anchor_count_frame, text="Number of Anchors:").pack(side=tk.LEFT, padx=5)
+        decrease_button = tk.Button(anchor_count_frame, text="-", command=self.decrease_anchors, width=3)
+        decrease_button.pack(side=tk.LEFT, padx=2)
+        
+        anchor_count_label = tk.Label(anchor_count_frame, text=str(self.num_anchors), font=("Helvetica", 14, "bold"), width=4)
+        anchor_count_label.pack(side=tk.LEFT, padx=5)
+        
+        increase_button = tk.Button(anchor_count_frame, text="+", command=self.increase_anchors, width=3)
+        increase_button.pack(side=tk.LEFT, padx=2)
+
+        # 高さ情報表示
+        height_info_text = f"Anchor Height: {self.anchor_height}m | Tag Height: {self.tag_height}m"
+        height_label = tk.Label(root, text=height_info_text, font=("Helvetica", 9), fg="gray")
+        height_label.pack(pady=2)
+
+        # 保存・リセットボタン
         save_button = tk.Button(root, text="Save Anchors", command=self.save_anchors_to_yaml)
         save_button.pack(pady=5)
         
@@ -138,6 +187,7 @@ class RvizAnchorPlacer(Node):
                     save_button.config(state=tk.NORMAL)
                 
                 status_label.config(text=status_text)
+                anchor_count_label.config(text=str(self.num_anchors))
             
             # 200msごとにGUIを更新
             root.after(200, update_gui_status)

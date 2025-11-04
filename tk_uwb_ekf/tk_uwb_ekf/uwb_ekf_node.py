@@ -21,6 +21,11 @@ class UwbEkfNode(Node):
         super().__init__('uwb_ekf_node')
 
         # --- パラメータ宣言 ---
+        self.declare_parameter('num_anchors', 3)
+        self.declare_parameter('anchor_height', 0.0)  # Anchor height from ground (z-coordinate)
+        self.declare_parameter('tag_height', 0.0)  # Tag height from ground
+        
+        # 後方互換性のため、デフォルトのアンカー位置を宣言
         self.declare_parameter('anchor_a_pos', [0.0, 5.0])
         self.declare_parameter('anchor_b_pos', [5.0, 5.0])
         self.declare_parameter('anchor_c_pos', [2.5, 0.0])
@@ -33,18 +38,30 @@ class UwbEkfNode(Node):
         self.declare_parameter('stationary_velocity_threshold', 0.02) # 停止とみなす速度のしきい値 (m/s, rad/s)
         self.declare_parameter('R_stationary_multiplier', 10.0) # 停止時にRを何倍にするか
 
+        self.num_anchors = self.get_parameter('num_anchors').get_parameter_value().integer_value
+        self.anchor_height = self.get_parameter('anchor_height').get_parameter_value().double_value
+        self.tag_height = self.get_parameter('tag_height').get_parameter_value().double_value
         self.history_size = self.get_parameter('history_size').get_parameter_value().integer_value
         self.variance_threshold = self.get_parameter('variance_threshold').get_parameter_value().double_value
         self.R_nlos_multiplier = self.get_parameter('R_nlos_multiplier').get_parameter_value().double_value
         self.stationary_velocity_threshold = self.get_parameter('stationary_velocity_threshold').get_parameter_value().double_value
         self.R_stationary_multiplier = self.get_parameter('R_stationary_multiplier').get_parameter_value().double_value
         
-        self.anchor_positions = {
-            'a': self.get_parameter('anchor_a_pos').get_parameter_value().double_array_value,
-            'b': self.get_parameter('anchor_b_pos').get_parameter_value().double_array_value,
-            'c': self.get_parameter('anchor_c_pos').get_parameter_value().double_array_value,
-        }
-        self.anchor_map = {0: 'a', 1: 'b', 2: 'c'}
+        # 動的にアンカー位置を読み込む
+        self.anchor_positions = {}
+        self.anchor_map = {}
+        for i in range(self.num_anchors):
+            # アルファベット順のラベルを生成 (a, b, c, d, ...)
+            anchor_label = chr(97 + i)  # 97 = 'a'
+            param_name = f'anchor_{anchor_label}_pos'
+            self.declare_parameter(param_name, [0.0, 0.0])
+            pos_2d = self.get_parameter(param_name).get_parameter_value().double_array_value
+            # 3D座標に変換（アンカー高さを追加）
+            self.anchor_positions[anchor_label] = list(pos_2d) + [self.anchor_height] if len(pos_2d) == 2 else list(pos_2d)
+            self.anchor_map[i] = anchor_label
+        
+        self.get_logger().info(f"Number of anchors: {self.num_anchors}")
+        self.get_logger().info(f"Anchor height: {self.anchor_height}m, Tag height: {self.tag_height}m")
         self.get_logger().info(f"Anchor positions: {self.anchor_positions}")
 
         # EKF設定
@@ -101,12 +118,16 @@ class UwbEkfNode(Node):
     def h_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
         dy = x[1, 0] - anchor_pos[1]
-        return np.array([[np.sqrt(dx**2 + dy**2)]])
+        # アンカーとタグの高さ差を考慮した3D距離計算
+        dz = self.tag_height - anchor_pos[2] if len(anchor_pos) > 2 else 0.0
+        return np.array([[np.sqrt(dx**2 + dy**2 + dz**2)]])
 
     def H_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
         dy = x[1, 0] - anchor_pos[1]
-        dist = np.sqrt(dx**2 + dy**2)
+        # アンカーとタグの高さ差を考慮した3D距離計算
+        dz = self.tag_height - anchor_pos[2] if len(anchor_pos) > 2 else 0.0
+        dist = np.sqrt(dx**2 + dy**2 + dz**2)
         if dist < 1e-6: return np.zeros((1, 5))
         H = np.zeros((1, 5)); H[0, 0] = dx / dist; H[0, 1] = dy / dist
         return H
