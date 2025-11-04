@@ -26,6 +26,7 @@ class RvizAnchorPlacer(Node):
         self.anchors = []
         self.lock = threading.Lock()
         self.min_anchors = 3  # 最小アンカー数
+        self.max_anchors = 26  # 最大アンカー数（アルファベットの制限）
 
         # RVizの /clicked_point トピックを購読
         self.subscription = self.create_subscription(
@@ -125,8 +126,11 @@ class RvizAnchorPlacer(Node):
     
     def increase_anchors(self):
         with self.lock:
-            self.num_anchors += 1
-            self.get_logger().info(f"Number of anchors increased to {self.num_anchors}")
+            if self.num_anchors < self.max_anchors:
+                self.num_anchors += 1
+                self.get_logger().info(f"Number of anchors increased to {self.num_anchors}")
+            else:
+                self.get_logger().warn(f"Cannot increase beyond maximum of {self.max_anchors} anchors")
     
     def decrease_anchors(self):
         with self.lock:

@@ -39,6 +39,15 @@ class UwbEkfNode(Node):
         self.declare_parameter('R_stationary_multiplier', 10.0) # 停止時にRを何倍にするか
 
         self.num_anchors = self.get_parameter('num_anchors').get_parameter_value().integer_value
+        
+        # アンカー数の妥当性チェック（最小3、最大26）
+        if self.num_anchors < 3:
+            self.get_logger().error(f"num_anchors must be at least 3, got {self.num_anchors}")
+            raise ValueError("num_anchors must be at least 3")
+        if self.num_anchors > 26:
+            self.get_logger().error(f"num_anchors must be at most 26, got {self.num_anchors}")
+            raise ValueError("num_anchors must be at most 26 (limited by alphabet labels)")
+        
         self.anchor_height = self.get_parameter('anchor_height').get_parameter_value().double_value
         self.tag_height = self.get_parameter('tag_height').get_parameter_value().double_value
         self.history_size = self.get_parameter('history_size').get_parameter_value().integer_value
@@ -56,8 +65,8 @@ class UwbEkfNode(Node):
             param_name = f'anchor_{anchor_label}_pos'
             self.declare_parameter(param_name, [0.0, 0.0])
             pos_2d = self.get_parameter(param_name).get_parameter_value().double_array_value
-            # 3D座標に変換（アンカー高さを追加）
-            self.anchor_positions[anchor_label] = list(pos_2d) + [self.anchor_height] if len(pos_2d) == 2 else list(pos_2d)
+            # 3D座標に変換（2D座標の場合はアンカー高さを追加、3D座標はそのまま使用）
+            self.anchor_positions[anchor_label] = self._convert_to_3d_position(list(pos_2d))
             self.anchor_map[i] = anchor_label
         
         self.get_logger().info(f"Number of anchors: {self.num_anchors}")
@@ -114,19 +123,34 @@ class UwbEkfNode(Node):
         F[1, 3] = dt * np.sin(theta)
         F[2, 4] = dt
         return F
+    
+    def _convert_to_3d_position(self, pos):
+        """2D座標を3D座標に変換するヘルパーメソッド"""
+        if len(pos) == 2:
+            # 2D座標の場合、anchor_heightを追加
+            return pos + [self.anchor_height]
+        elif len(pos) >= 3:
+            # 既に3D座標の場合はそのまま返す
+            return pos[:3]
+        else:
+            # 不正な座標の場合はデフォルト値を返す
+            self.get_logger().warn(f"Invalid position format: {pos}, using default [0, 0, anchor_height]")
+            return [0.0, 0.0, self.anchor_height]
+    
+    def _get_height_difference(self, anchor_pos):
+        """アンカーとタグの高さ差を取得するヘルパーメソッド"""
+        return self.tag_height - anchor_pos[2] if len(anchor_pos) > 2 else 0.0
 
     def h_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
         dy = x[1, 0] - anchor_pos[1]
-        # アンカーとタグの高さ差を考慮した3D距離計算
-        dz = self.tag_height - anchor_pos[2] if len(anchor_pos) > 2 else 0.0
+        dz = self._get_height_difference(anchor_pos)
         return np.array([[np.sqrt(dx**2 + dy**2 + dz**2)]])
 
     def H_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
         dy = x[1, 0] - anchor_pos[1]
-        # アンカーとタグの高さ差を考慮した3D距離計算
-        dz = self.tag_height - anchor_pos[2] if len(anchor_pos) > 2 else 0.0
+        dz = self._get_height_difference(anchor_pos)
         dist = np.sqrt(dx**2 + dy**2 + dz**2)
         if dist < 1e-6: return np.zeros((1, 5))
         H = np.zeros((1, 5)); H[0, 0] = dx / dist; H[0, 1] = dy / dist
