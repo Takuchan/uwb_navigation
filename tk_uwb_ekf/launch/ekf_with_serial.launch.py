@@ -2,6 +2,8 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
@@ -28,8 +30,8 @@ def generate_launch_description():
         num_anchors = len(anchors_list)
         
         # 高さ情報を取得（オプション）
-        anchor_height = anchor_data.get('anchor_height', default_anchor_height)
-        tag_height = anchor_data.get('tag_height', default_tag_height)
+        anchor_height_from_yaml = anchor_data.get('anchor_height', default_anchor_height)
+        tag_height_from_yaml = anchor_data.get('tag_height', default_tag_height)
         
         anchor_params = {}
         for i, anchor in enumerate(anchors_list):
@@ -45,10 +47,14 @@ def generate_launch_description():
     else:
         # ファイルが存在しない場合
         num_anchors = default_num_anchors
-        anchor_height = default_anchor_height
-        tag_height = default_tag_height
+        anchor_height_from_yaml = default_anchor_height
+        tag_height_from_yaml = default_tag_height
         final_anchor_positions = default_anchor_positions
         print("アンカーの設置ポイントが保存された anchors.yaml プログラムがありません。")
+    
+    # Launch引数（uwb_nav.launch.pyからオーバーライド可能）
+    anchor_height_arg = LaunchConfiguration('anchor_height', default=str(anchor_height_from_yaml))
+    tag_height_arg = LaunchConfiguration('tag_height', default=str(tag_height_from_yaml))
 
     # --- ノードの定義 ---
     uwb_ekf_node = Node(
@@ -62,8 +68,8 @@ def generate_launch_description():
             {'baud_rate': 3000000},
             {'uwb_timeout': 0.05},
             {'num_anchors': num_anchors},
-            {'anchor_height': anchor_height},
-            {'tag_height': tag_height},
+            {'anchor_height': anchor_height_arg},
+            {'tag_height': tag_height_arg},
             # final_anchor_positions を展開してパラメータとして渡す
             final_anchor_positions 
         ]
@@ -84,6 +90,16 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'anchor_height',
+            default_value=str(anchor_height_from_yaml),
+            description='Height of UWB anchors from ground (in meters)'
+        ),
+        DeclareLaunchArgument(
+            'tag_height',
+            default_value=str(tag_height_from_yaml),
+            description='Height of UWB tag from ground (in meters)'
+        ),
         uwb_ekf_node,
         serial_publisher_node # 新しいノードを LaunchDescription に追加
     ])

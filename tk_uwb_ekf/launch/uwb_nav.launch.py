@@ -45,7 +45,11 @@ def generate_launch_description():
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(tk_uwb_ekf_dir, 'launch', 'ekf_with_serial.launch.py')
-            )
+            ),
+            launch_arguments={
+                'anchor_height': anchor_height,
+                'tag_height': tag_height
+            }.items()
         ),
 
         IncludeLaunchDescription(
