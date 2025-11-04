@@ -8,6 +8,10 @@ import threading
 import yaml
 import os
 
+# アンカー数の制限（アルファベットラベルの制限による）
+MIN_ANCHORS = 3
+MAX_ANCHORS = 26
+
 class RvizAnchorPlacer(Node):
     def __init__(self):
         super().__init__('rviz_anchor_placer')
@@ -25,8 +29,8 @@ class RvizAnchorPlacer(Node):
         
         self.anchors = []
         self.lock = threading.Lock()
-        self.min_anchors = 3  # 最小アンカー数
-        self.max_anchors = 26  # 最大アンカー数（アルファベットの制限）
+        self.min_anchors = MIN_ANCHORS
+        self.max_anchors = MAX_ANCHORS
 
         # RVizの /clicked_point トピックを購読
         self.subscription = self.create_subscription(

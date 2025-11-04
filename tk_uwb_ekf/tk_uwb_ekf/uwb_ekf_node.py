@@ -14,7 +14,11 @@ from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_from_euler
 
 from filterpy.kalman import ExtendedKalmanFilter
-import math 
+import math
+
+# アンカー数の制限（アルファベットラベルの制限による）
+MIN_ANCHORS = 3
+MAX_ANCHORS = 26 
 
 class UwbEkfNode(Node):
     def __init__(self):
@@ -40,13 +44,13 @@ class UwbEkfNode(Node):
 
         self.num_anchors = self.get_parameter('num_anchors').get_parameter_value().integer_value
         
-        # アンカー数の妥当性チェック（最小3、最大26）
-        if self.num_anchors < 3:
-            self.get_logger().error(f"num_anchors must be at least 3, got {self.num_anchors}")
-            raise ValueError("num_anchors must be at least 3")
-        if self.num_anchors > 26:
-            self.get_logger().error(f"num_anchors must be at most 26, got {self.num_anchors}")
-            raise ValueError("num_anchors must be at most 26 (limited by alphabet labels)")
+        # アンカー数の妥当性チェック
+        if self.num_anchors < MIN_ANCHORS:
+            self.get_logger().error(f"num_anchors must be at least {MIN_ANCHORS}, got {self.num_anchors}")
+            raise ValueError(f"num_anchors must be at least {MIN_ANCHORS}")
+        if self.num_anchors > MAX_ANCHORS:
+            self.get_logger().error(f"num_anchors must be at most {MAX_ANCHORS}, got {self.num_anchors}")
+            raise ValueError(f"num_anchors must be at most {MAX_ANCHORS} (limited by alphabet labels)")
         
         self.anchor_height = self.get_parameter('anchor_height').get_parameter_value().double_value
         self.tag_height = self.get_parameter('tag_height').get_parameter_value().double_value
@@ -130,8 +134,14 @@ class UwbEkfNode(Node):
             # 2D座標の場合、anchor_heightを追加
             return pos + [self.anchor_height]
         elif len(pos) >= 3:
-            # 既に3D座標の場合はそのまま返す
-            return pos[:3]
+            # 既に3D座標の場合、最初の3要素を取得し、有効性を確認
+            pos_3d = pos[:3]
+            # すべての座標が数値であることを確認
+            if all(isinstance(x, (int, float)) for x in pos_3d):
+                return pos_3d
+            else:
+                self.get_logger().warn(f"Invalid position values in {pos}, using default [0, 0, anchor_height]")
+                return [0.0, 0.0, self.anchor_height]
         else:
             # 不正な座標の場合はデフォルト値を返す
             self.get_logger().warn(f"Invalid position format: {pos}, using default [0, 0, anchor_height]")
@@ -139,7 +149,7 @@ class UwbEkfNode(Node):
     
     def _get_height_difference(self, anchor_pos):
         """アンカーとタグの高さ差を取得するヘルパーメソッド"""
-        return self.tag_height - anchor_pos[2] if len(anchor_pos) > 2 else 0.0
+        return self.tag_height - anchor_pos[2] if len(anchor_pos) >= 3 else 0.0
 
     def h_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
