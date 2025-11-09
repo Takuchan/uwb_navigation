@@ -75,6 +75,7 @@ class UwbEkfNode(Node):
         
         self.get_logger().info(f"Number of anchors: {self.num_anchors}")
         self.get_logger().info(f"Anchor height: {self.anchor_height}m, Tag height: {self.tag_height}m")
+        self.get_logger().info(f"Anchorの数は: {len(self.num_anchors)}")
         self.get_logger().info(f"Anchor positions: {self.anchor_positions}")
 
         # EKF設定
@@ -146,22 +147,16 @@ class UwbEkfNode(Node):
             # 不正な座標の場合はデフォルト値を返す
             self.get_logger().warn(f"Invalid position format: {pos}, using default [0, 0, anchor_height]")
             return [0.0, 0.0, self.anchor_height]
-    
-    def _get_height_difference(self, anchor_pos):
-        """アンカーとタグの高さ差を取得するヘルパーメソッド"""
-        return self.tag_height - anchor_pos[2] if len(anchor_pos) >= 3 else 0.0
 
     def h_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
         dy = x[1, 0] - anchor_pos[1]
-        dz = self._get_height_difference(anchor_pos)
-        return np.array([[np.sqrt(dx**2 + dy**2 + dz**2)]])
+        return np.array([[np.sqrt(dx**2 + dy**2)]])
 
     def H_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
         dy = x[1, 0] - anchor_pos[1]
-        dz = self._get_height_difference(anchor_pos)
-        dist = np.sqrt(dx**2 + dy**2 + dz**2)
+        dist = np.sqrt(dx**2 + dy**2)
         if dist < 1e-6: return np.zeros((1, 5))
         H = np.zeros((1, 5)); H[0, 0] = dx / dist; H[0, 1] = dy / dist
         return H
@@ -219,7 +214,19 @@ class UwbEkfNode(Node):
                 anchor_id = self.anchor_map.get(twr_index)
                 if anchor_id:
                     anchor_pos = self.anchor_positions[anchor_id]
-                    z = np.array([[data['distance']]])
+
+                    slant_range = data['distance']
+                    height_diff = abs(self.tag_height - anchor_pos[2])
+                    if (slant_range < height_diff):
+                        self.get_logger().warn(
+                            f"{anchor_id}:"
+                            f"UWBからの距離データ{slant_range:.2f}m < 高さ差{height_diff:.2f}m"
+                        )
+                        continue
+
+                    horizontal_distance = np.sqrt(slant_range**2 - height_diff**2)
+                    z = np.array([[horizontal_distance]])
+
                     
                     self.ekf.update(z, HJacobian=self.H_uwb, Hx=self.h_uwb, R=current_R,
                                     args=(anchor_pos,), hx_args=(anchor_pos,))
