@@ -125,7 +125,7 @@ class SerialFilter:
 
 # This block is for standalone testing of this module
 if __name__ == "__main__":
-    uwb_filter = SerialFilter(com_port="/dev/ttyUSB0", num_anchors=3)
+    uwb_filter = SerialFilter(com_port="/dev/ttyUSB1", num_anchors=6)
     if not uwb_filter.connect_serial():
         print("プログラムを終了します")
         exit()

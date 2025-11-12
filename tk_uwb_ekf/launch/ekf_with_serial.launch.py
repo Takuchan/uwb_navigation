@@ -23,7 +23,7 @@ def generate_launch_description():
 
     # 【必須】必ず実行前にデフォルト値の確認をする。特にTag
     default_anchor_height = 0.0
-    default_tag_height = 0.0
+    default_tag_height = 0.6
     final_anchor_positions = {}
 
 
@@ -37,6 +37,7 @@ def generate_launch_description():
     anchor_height_from_yaml = anchor_data.get('anchor_height', default_anchor_height)
     tag_height_from_yaml = anchor_data.get('tag_height', default_tag_height)
     
+
     anchor_params = {}
     for i, anchor in enumerate(anchors_list):
         param_name = f'anchor_{chr(97 + i)}_pos' 
@@ -65,8 +66,8 @@ def generate_launch_description():
             {'baud_rate': 3000000},
             {'uwb_timeout': 0.05},
             {'num_anchors': num_anchors},
-            {'anchor_height': anchor_height_arg},
-            {'tag_height': tag_height_arg},
+            # {'anchor_height': anchor_height_arg}, # なんか使えなかったので、直接ノードで編集せよ。
+            # {'tag_height': tag_height_arg},
             # final_anchor_positions を展開してパラメータとして渡す
             final_anchor_positions 
         ]
@@ -82,7 +83,8 @@ def generate_launch_description():
         parameters=[
             {'com_port': '/dev/ttyUSB1'},
             {'baud_rate': 3000000},
-            {'uwb_timeout': 0.05}
+            {'uwb_timeout': 0.05},
+            {'num_anchors': num_anchors},
         ]
     )
 

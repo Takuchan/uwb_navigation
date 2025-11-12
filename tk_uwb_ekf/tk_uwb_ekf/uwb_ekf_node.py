@@ -26,21 +26,17 @@ class UwbEkfNode(Node):
 
         # --- パラメータ宣言 ---
         self.declare_parameter('num_anchors', 3)
-        self.declare_parameter('anchor_height', 0.0)  # Anchor height from ground (z-coordinate)
-        self.declare_parameter('tag_height', 0.0)  # Tag height from ground
+        self.declare_parameter('anchor_height', 1.27)  # Anchor height from ground (z-coordinate)
+        self.declare_parameter('tag_height', 0.6)  # Tag height from ground
         
-        # 後方互換性のため、デフォルトのアンカー位置を宣言
-        self.declare_parameter('anchor_a_pos', [0.0, 5.0])
-        self.declare_parameter('anchor_b_pos', [5.0, 5.0])
-        self.declare_parameter('anchor_c_pos', [2.5, 0.0])
         
         # UWBデータフィルタリング用パラメータ
         self.declare_parameter('history_size', 5)
         self.declare_parameter('variance_threshold', 0.05) # <<< 変更: nlos_を削除し、全データに適用
-        self.declare_parameter('R_nlos_multiplier', 4.0)
+        self.declare_parameter('R_nlos_multiplier', 20.0)
         
         self.declare_parameter('stationary_velocity_threshold', 0.02) # 停止とみなす速度のしきい値 (m/s, rad/s)
-        self.declare_parameter('R_stationary_multiplier', 10.0) # 停止時にRを何倍にするか
+        self.declare_parameter('R_stationary_multiplier', 20.0) # 停止時にRを何倍にするか
 
         self.num_anchors = self.get_parameter('num_anchors').get_parameter_value().integer_value
         
@@ -52,6 +48,8 @@ class UwbEkfNode(Node):
             self.get_logger().error(f"num_anchors must be at most {MAX_ANCHORS}, got {self.num_anchors}")
             raise ValueError(f"num_anchors must be at most {MAX_ANCHORS} (limited by alphabet labels)")
         
+        self.get_logger().info(f"アンカーのたかさは{self.get_parameter('anchor_height').get_parameter_value()}")
+        self.get_logger().info(f"アンカーのたかさは{self.get_parameter('tag_height').get_parameter_value()}")
         self.anchor_height = self.get_parameter('anchor_height').get_parameter_value().double_value
         self.tag_height = self.get_parameter('tag_height').get_parameter_value().double_value
         self.history_size = self.get_parameter('history_size').get_parameter_value().integer_value
@@ -75,7 +73,6 @@ class UwbEkfNode(Node):
         
         self.get_logger().info(f"Number of anchors: {self.num_anchors}")
         self.get_logger().info(f"Anchor height: {self.anchor_height}m, Tag height: {self.tag_height}m")
-        self.get_logger().info(f"Anchorの数は: {len(self.num_anchors)}")
         self.get_logger().info(f"Anchor positions: {self.anchor_positions}")
 
         # EKF設定
@@ -214,7 +211,7 @@ class UwbEkfNode(Node):
                 anchor_id = self.anchor_map.get(twr_index)
                 if anchor_id:
                     anchor_pos = self.anchor_positions[anchor_id]
-
+                    self.get_logger().info(f"今これ処理してまーす{anchor_id}")
                     slant_range = data['distance']
                     height_diff = abs(self.tag_height - anchor_pos[2])
                     if (slant_range < height_diff):
