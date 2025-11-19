@@ -11,12 +11,30 @@ def generate_launch_description():
     map_file = os.path.join(tk_uwb_ekf_dir, 'maps', 'map.yaml')
     default_save_path = os.path.join(tk_uwb_ekf_dir, 'param', 'anchors.yaml')
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
+    num_anchors = LaunchConfiguration('num_anchors', default='3')
+    anchor_height = LaunchConfiguration('anchor_height', default='0.0')
+    tag_height = LaunchConfiguration('tag_height', default='0.0')
 
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_sim_time',
             default_value='false',
             description='Use simulation (Gazebo) clock if true'
+        ),
+        DeclareLaunchArgument(
+            'num_anchors',
+            default_value='3',
+            description='Initial number of anchors to place'
+        ),
+        DeclareLaunchArgument(
+            'anchor_height',
+            default_value='0.0',
+            description='Height of UWB anchors from ground (in meters)'
+        ),
+        DeclareLaunchArgument(
+            'tag_height',
+            default_value='0.0',
+            description='Height of UWB tag from ground (in meters)'
         ),
 
         Node(
@@ -47,8 +65,10 @@ def generate_launch_description():
             output='screen',
             emulate_tty=True,
             parameters=[
-                {'num_anchors': 3},
-                {'save_path': default_save_path}
+                {'num_anchors': num_anchors},
+                {'save_path': default_save_path},
+                {'anchor_height': anchor_height},
+                {'tag_height': tag_height}
             ]
         )
     ])
