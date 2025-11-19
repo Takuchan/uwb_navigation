@@ -86,7 +86,7 @@ class SerialFilter:
                     distance_match = distance_pattern.search(line)
                     if distance_match:
                         twr_id = int(distance_match.group(1))
-                        dist_cm = float(distance_match.group(2))
+                        dist_cm = float(distance_match.group(2)) + 30.0
                         collected_data.setdefault(twr_id, {})["distance"] = round(dist_cm / 100, 2)
                         continue
                     
@@ -123,9 +123,10 @@ class SerialFilter:
 
         return final_result
 
-# This block is for standalone testing of this module
-if __name__ == "__main__":
-    uwb_filter = SerialFilter(com_port="/dev/ttyUSB0", num_anchors=3)
+
+
+def main():
+    uwb_filter = SerialFilter(com_port="/dev/ttyUSB1", num_anchors=6)
     if not uwb_filter.connect_serial():
         print("プログラムを終了します")
         exit()
@@ -144,3 +145,7 @@ if __name__ == "__main__":
         print("キーボード割り込みを検出しました。プログラムを終了します")
     finally:
         uwb_filter.disconnect_serial()
+
+# This block is for standalone testing of this module
+if __name__ == "__main__":
+    main()

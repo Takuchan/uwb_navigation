@@ -32,9 +32,11 @@ setup(
         'console_scripts': [
             'uwb_ekf_node = tk_uwb_ekf.uwb_ekf_node:main',
             'rviz_anchor_place = tk_uwb_ekf.rviz_anchor_place:main',
+            'serialFilter = tk_uwb_ekf.serialandFilter:main',
             'serialAndFliterPublisher = tk_uwb_ekf.serialAndFliterPublisher:main',
             'uwb_gui = tk_uwb_ekf.uwb_gui_node:main',
             'get_map = tk_uwb_ekf.get_map:main',
+            'experiment_gui = tk_uwb_ekf.experiment_gui:main'
             
         ],
     },
