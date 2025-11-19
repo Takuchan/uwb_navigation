@@ -88,6 +88,15 @@ def generate_launch_description():
         ]
     )
 
+    experiment_gui_node = Node(
+        package='tk_uwb_ekf',
+        executable='experiment_gui',
+        name='experiment_gui',
+        output='screen',
+        emulate_tty=True
+    )
+
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'anchor_height',
@@ -100,5 +109,6 @@ def generate_launch_description():
             description='Height of UWB tag from ground (in meters)'
         ),
         uwb_ekf_node,
-        serial_publisher_node # 新しいノードを LaunchDescription に追加
+        serial_publisher_node,
+        experiment_gui_node
     ])
