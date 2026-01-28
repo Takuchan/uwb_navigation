@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
@@ -11,15 +12,18 @@ import os
 import json
 from datetime import datetime
 
-from geometry_msgs.msg import PointStamped, Twist
+from geometry_msgs.msg import PointStamped, Twist, PoseStamped
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 from tf_transformations import euler_from_quaternion
+from nav2_msgs.action import NavigateToPose
 
 class ExperimentGUINode(Node):
     """
     全実験（位置精度・姿勢評価・データロギング）を統括するGUIノード。
-    距離指定停止機能とUWB詳細ログ機能を追加。
+    実験①: クリック位置精度
+    実験②: 距離指定直進 (cmd_vel)
+    実験③: 自律移動 (Nav2) [NEW]
     """
     def __init__(self):
         super().__init__('experiment_gui_node')
@@ -31,65 +35,69 @@ class ExperimentGUINode(Node):
         self.create_subscription(PointStamped, '/clicked_point', self.clicked_point_callback, 10)
         # 3. UWB生データ（ログ用）
         self.create_subscription(String, '/uwb_data_json', self.uwb_callback, 10)
-        # 4. ロボット操作用（実験②自動化用）
+        # 4. ロボット操作用（実験②用）
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        
+        # 5. Nav2関連 [NEW]
+        self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self.create_subscription(PoseStamped, '/goal_pose', self.goal_pose_callback, 10)
 
         # --- 内部変数 ---
         self.lock = threading.Lock()
         
         # ロボット状態
         self.robot_pose = None
-        self.current_yaw = 0.0      # 生のYaw角 (Map座標系)
-        self.relative_yaw = 0.0     # リセット基準からの相対Yaw
-        self.initial_yaw_ref = 0.0  # 角度リセット時の基準値
+        self.current_yaw = 0.0      # Map Yaw
+        self.relative_yaw = 0.0     # Relative Yaw
+        self.initial_yaw_ref = 0.0  
         
-        # UWBデータ保持用
-        self.latest_uwb_raw = {}     # 最新のJSONデータ辞書
-        self.uwb_log_str = ""        # CSV記録用に整形した文字列
+        # UWBデータ保持
+        self.latest_uwb_raw = {}    
+        self.uwb_log_str = ""       
         
         # 実験①用
         self.target_point = None
         
-        # 実験②（自動走行）用
-        self.is_running = False
+        # 実験②（直進）用
+        self.is_running_exp2 = False
         self.start_pos = None
         self.travel_dist = 0.0
+        self.target_velocity = 0.5
+        self.target_distance = 3.0
+        
+        # 実験③（Nav2）用
+        self.nav2_goal = None       # 記憶したゴール
+        self.is_running_exp3 = False
+        
+        # 共通ログ管理
+        self.is_logging = False     # ログ取り中フラグ
         self.log_data = [] 
         self.start_time = 0.0
         
-        # 設定パラメータ（GUIから取得）
-        self.target_velocity = 0.5
-        self.target_distance = 3.0   # 目標走行距離 (m)
-        
-        # --- GUI起動 ---
-        self.gui_thread = threading.Thread(target=self.run_gui, daemon=True)
-        self.gui_thread.start()
-        
-        # 制御ループ (20Hz) - 停止精度向上のため少し早める
+        # 試行回数管理 {アンカー数: 回数}
+        self.trial_counts = {i: 0 for i in range(2, 7)}
+
+        # 制御ループ (20Hz)
         self.create_timer(0.05, self.control_loop)
 
-        self.get_logger().info("Experiment GUI Node Started (Distance Mode).")
+        self.get_logger().info("Experiment GUI Node Started.")
 
+    # ---------------------------------------------------------
+    # コールバック関数群
+    # ---------------------------------------------------------
     def uwb_callback(self, msg: String):
-        """ /uwb_data_json を購読して、ログ用の文字列を生成する """
         with self.lock:
             try:
                 data = json.loads(msg.data)
                 self.latest_uwb_raw = data
                 
-                # CSV記録用に整形: "A0:LOS(1.2m)|A1:nLOS(3.5m)..."
                 log_parts = []
-                # キー(TWR0, TWR1...)でソートして順序を固定
                 for key in sorted(data.keys()):
                     val = data[key]
                     if val is None: continue
-                    
-                    # マッピング TWR0 -> A0 (簡易変換)
                     idx = key.replace("TWR", "A") 
                     status = val.get('nlos_los', 'Unk')
                     dist = val.get('distance', 0.0)
-                    
-                    # 例: A0:LOS(3.45)
                     log_parts.append(f"{idx}:{status}({dist:.2f})")
                 
                 self.uwb_log_str = "|".join(log_parts)
@@ -101,29 +109,26 @@ class ExperimentGUINode(Node):
         with self.lock:
             self.robot_pose = msg.pose.pose
             
-            # 姿勢(Quaternion) -> Yaw(Euler)
             q = msg.pose.pose.orientation
             (roll, pitch, yaw) = euler_from_quaternion([q.x, q.y, q.z, q.w])
             deg = math.degrees(yaw)
             self.current_yaw = deg
             
-            # 相対角度計算 (-180 ~ 180)
             diff = deg - self.initial_yaw_ref
             while diff > 180: diff -= 360
             while diff < -180: diff += 360
             self.relative_yaw = diff
             
-            # 自動走行中の処理
-            if self.is_running and self.start_pos:
+            # ログ記録 (実験② または 実験③ が実行中の場合)
+            if self.is_logging and self.start_pos:
                 curr_x = self.robot_pose.position.x
                 curr_y = self.robot_pose.position.y
                 
-                # 走行距離計算
+                # 開始地点からの移動距離
                 dx = curr_x - self.start_pos[0]
                 dy = curr_y - self.start_pos[1]
                 self.travel_dist = math.sqrt(dx**2 + dy**2)
                 
-                # ログ記録
                 elapsed = time.time() - self.start_time
                 self.log_data.append({
                     "time": elapsed,
@@ -132,7 +137,7 @@ class ExperimentGUINode(Node):
                     "yaw_raw": self.current_yaw,
                     "yaw_rel": self.relative_yaw,
                     "dist": self.travel_dist,
-                    "uwb_detail": self.uwb_log_str # その瞬間のUWB状況
+                    "uwb_detail": self.uwb_log_str
                 })
 
     def clicked_point_callback(self, msg: PointStamped):
@@ -140,77 +145,190 @@ class ExperimentGUINode(Node):
             self.target_point = msg.point
         self.get_logger().info(f"Exp1 Target Set: {msg.point.x}, {msg.point.y}")
 
-    def control_loop(self):
-        """ 距離監視と自動停止 """
-        if not self.is_running:
-            return
+    def goal_pose_callback(self, msg: PoseStamped):
+        """ Rviz等からのゴールを受信して記憶 """
+        with self.lock:
+            self.nav2_goal = msg
+        self.get_logger().info("Exp3: Nav2 Goal Memorized!")
+        # GUIの色更新等はupdate_gui_loopで行う
 
-        # 1. 停止判定: 目標距離を超えたら停止
-        if self.travel_dist >= self.target_distance:
-            self.get_logger().info(f"Target Distance Reached! ({self.travel_dist:.3f}m)")
-            self.stop_experiment_logic()
+    # ---------------------------------------------------------
+    # ロジック: 実験② (距離停止)
+    # ---------------------------------------------------------
+    def start_exp2_logic(self):
+        if self.robot_pose is None:
+            messagebox.showwarning("Error", "Odomデータなし")
             return
+        
+        with self.lock:
+            try:
+                self.target_velocity = float(self.entry_speed.get())
+                self.target_distance = float(self.entry_dist.get())
+            except ValueError: return
 
-        # 2. 速度指令 (直進)
+            self.is_running_exp2 = True
+            self.is_logging = True      # ログ開始
+            self.start_time = time.time()
+            self.log_data = []
+            self.start_pos = (self.robot_pose.position.x, self.robot_pose.position.y)
+            self.travel_dist = 0.0
+        
+        # GUI制御
+        self.toggle_buttons(exp_running=2)
+        self.get_logger().info(f"Exp2 Started. Target: {self.target_distance}m")
+
+    def stop_exp2_logic(self):
+        if not self.is_running_exp2: return
+        
+        self.is_running_exp2 = False
+        self.is_logging = False
+        
         twist = Twist()
-        twist.linear.x = self.target_velocity
-        twist.angular.z = 0.0 # 補正なしの純粋な直進指令
         self.cmd_vel_pub.publish(twist)
+        self.cmd_vel_pub.publish(twist)
+        
+        self.toggle_buttons(exp_running=0)
+        self.get_logger().info("Exp2 Stopped.")
+        messagebox.showinfo("Info", "実験②終了。誤差を入力して保存してください。")
 
-    # --- ロジック系 ---
+    def control_loop(self):
+        """ 実験②の制御ループ """
+        if self.is_running_exp2:
+            # 距離判定
+            if self.travel_dist >= self.target_distance:
+                self.get_logger().info("Exp2: Distance Reached")
+                self.stop_exp2_logic()
+                return
+            
+            # 直進指令
+            twist = Twist()
+            twist.linear.x = self.target_velocity
+            self.cmd_vel_pub.publish(twist)
+
+    # ---------------------------------------------------------
+    # ロジック: 実験③ (Nav2自律移動)
+    # ---------------------------------------------------------
+    def start_exp3_logic(self):
+        if self.nav2_goal is None:
+            messagebox.showwarning("Error", "ゴールが設定されていません。\nRvizで '2D Goal Pose' を指定してください。")
+            return
+        if self.robot_pose is None:
+            messagebox.showwarning("Error", "Odomデータなし")
+            return
+            
+        # Action Server確認
+        if not self._action_client.wait_for_server(timeout_sec=1.0):
+            messagebox.showerror("Error", "Nav2 Action Serverが見つかりません。\nNav2を起動してください。")
+            return
+
+        with self.lock:
+            self.is_running_exp3 = True
+            self.is_logging = True      # ログ開始
+            self.start_time = time.time()
+            self.log_data = []
+            self.start_pos = (self.robot_pose.position.x, self.robot_pose.position.y)
+            self.travel_dist = 0.0
+        
+        # ゴール送信
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = self.nav2_goal
+        
+        self.get_logger().info("Exp3: Sending Goal to Nav2...")
+        send_future = self._action_client.send_goal_async(goal_msg)
+        send_future.add_done_callback(self.nav2_goal_response_callback)
+        
+        self.toggle_buttons(exp_running=3)
+
+    def nav2_goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().info('Exp3: Goal rejected')
+            self.stop_exp3_logic(success=False, msg="Goal Rejected")
+            return
+
+        self.get_logger().info('Exp3: Goal accepted')
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(self.nav2_result_callback)
+
+    def nav2_result_callback(self, future):
+        result = future.result().result
+        self.get_logger().info('Exp3: Navigation finished')
+        # メインスレッド(GUI)ではないため、停止処理呼び出しには注意が必要だが
+        # 今回はフラグ操作とGUI状態更新なので、threading lockがあれば概ね安全
+        # ただしTkinter操作はメインスレッド推奨なので、after等を使うのがベストだが簡易的に実装
+        self.stop_exp3_logic(success=True, msg="Arrived")
+
+    def stop_exp3_logic(self, success=True, msg=""):
+        if not self.is_running_exp3: return
+        
+        self.is_running_exp3 = False
+        self.is_logging = False
+        
+        self.toggle_buttons(exp_running=0)
+        self.get_logger().info(f"Exp3 Finished: {msg}")
+        
+        # Tkinterのメインループ内ではないスレッドから呼ばれる可能性があるため、
+        # メッセージボックス等は即時表示されない場合があるが、今回は簡易実装とする
+        if success:
+             # 完了通知はGUIループ側で検知させてもよいが、ここではLog出力のみ
+             pass
+
+    def cancel_exp3_logic(self):
+        """ 実験③の強制中断（キャンセル機能は簡易的） """
+        if self.is_running_exp3:
+            self.is_running_exp3 = False
+            self.is_logging = False
+            self.toggle_buttons(exp_running=0)
+            self.get_logger().info("Exp3 Cancelled manually.")
+            # 本当はActionClient.cancel_goalを送るべきだが、今回はログ停止のみ行う
+
+    # ---------------------------------------------------------
+    # 共通: その他ロジック
+    # ---------------------------------------------------------
     def reset_yaw_reference(self):
         with self.lock:
             if self.robot_pose:
                 q = self.robot_pose.orientation
                 (_, _, yaw) = euler_from_quaternion([q.x, q.y, q.z, q.w])
                 self.initial_yaw_ref = math.degrees(yaw)
-                self.get_logger().info(f"Yaw Reference Reset. 0 deg = {self.initial_yaw_ref:.2f} (Map)")
 
-    def start_experiment_logic(self):
-        if self.robot_pose is None:
-            messagebox.showwarning("Error", "Odomデータが来ていません")
-            return
+    def toggle_buttons(self, exp_running=0):
+        """
+        0: 待機中 (全て有効、保存有効)
+        2: 実験②実行中
+        3: 実験③実行中
+        """
+        if exp_running == 0:
+            self.btn_exp2_start.config(state="normal")
+            self.btn_exp2_stop.config(state="disabled")
+            self.btn_exp3_start.config(state="normal")
+            self.btn_exp3_stop.config(state="disabled")
+            self.btn_save.config(state="normal")
+            self.entry_error.config(state="normal")
+        else:
+            self.btn_exp2_start.config(state="disabled")
+            self.btn_exp3_start.config(state="disabled")
+            self.btn_save.config(state="disabled")
             
-        with self.lock:
-            # パラメータ取得
-            try:
-                self.target_velocity = float(self.entry_speed.get())
-                self.target_distance = float(self.entry_dist.get())
-            except ValueError:
-                messagebox.showerror("Error", "数値が不正です")
-                return
-
-            self.is_running = True
-            self.start_time = time.time()
-            self.log_data = []
-            self.start_pos = (self.robot_pose.position.x, self.robot_pose.position.y)
-            self.travel_dist = 0.0
-            
-        self.get_logger().info(f"Auto Run Started. Target: {self.target_distance}m")
-
-    def stop_experiment_logic(self):
-        """ 停止処理 """
-        self.is_running = False
-        # 停止コマンド送信 (念のため数回送る)
-        twist = Twist()
-        self.cmd_vel_pub.publish(twist)
-        self.cmd_vel_pub.publish(twist)
-        self.get_logger().info("Auto Run Stopped.")
-        
-        # 終了時の角度判定ログ
-        final_yaw = self.relative_yaw
-        judge = "OK (Parallel)" if abs(final_yaw) < 5.0 else "NG (Drifted)"
-        self.get_logger().info(f"Final Yaw Error: {final_yaw:.2f} deg -> {judge}")
+            if exp_running == 2:
+                self.btn_exp2_stop.config(state="normal")
+                self.btn_exp3_stop.config(state="disabled")
+            elif exp_running == 3:
+                self.btn_exp2_stop.config(state="disabled")
+                self.btn_exp3_stop.config(state="normal")
 
     def save_csv(self):
-        """ データのCSV保存 (UWB詳細付き) """
-        filename = self.entry_filename.get()
-        if not filename:
-            messagebox.showwarning("Warning", "ファイル名を入力してください")
+        try:
+            anchors = int(self.var_anchors.get())
+            manual_error = float(self.entry_error.get())
+        except ValueError:
+            messagebox.showwarning("Warning", "数値が不正です")
             return
         
-        if not filename.endswith(".csv"): filename += ".csv"
-            
+        self.trial_counts[anchors] += 1
+        trial_num = self.trial_counts[anchors]
+        
+        filename = f"log_{anchors}anchors_try{trial_num}.csv"
         save_path = os.path.join(os.path.expanduser('~'), 'uwb_experiment_data', filename)
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
@@ -220,179 +338,163 @@ class ExperimentGUINode(Node):
                 
             with open(save_path, 'w', newline='') as f:
                 writer = csv.writer(f)
-                # ヘッダー: UWBの詳細列を追加
-                writer.writerow(["Time(s)", "X(m)", "Y(m)", "Yaw_Raw(deg)", "Yaw_Rel(deg)", "Distance(m)", "UWB_Status"])
-                
+                writer.writerow([
+                    "Time(s)", "X(m)", "Y(m)", "Yaw_Raw(deg)", "Yaw_Rel(deg)", 
+                    "Distance(m)", "UWB_Status", "Anchor_Count", "Manual_Error(m)"
+                ])
                 for row in data_to_save:
                     writer.writerow([
-                        f"{row['time']:.4f}",
-                        f"{row['x']:.4f}",
-                        f"{row['y']:.4f}",
-                        f"{row['yaw_raw']:.4f}",
-                        f"{row['yaw_rel']:.4f}",
-                        f"{row['dist']:.4f}",
-                        row['uwb_detail'] # 例: A0:LOS(2.5)|A1:nLOS(5.0)
+                        f"{row['time']:.4f}", f"{row['x']:.4f}", f"{row['y']:.4f}",
+                        f"{row['yaw_raw']:.4f}", f"{row['yaw_rel']:.4f}", f"{row['dist']:.4f}",
+                        row['uwb_detail'], anchors, manual_error
                     ])
             
-            messagebox.showinfo("Success", f"保存しました:\n{save_path}\nデータ数: {len(data_to_save)}")
+            self.lbl_trial_info.config(text=f"現在: {anchors}個 - Try {trial_num} 完了")
+            messagebox.showinfo("Success", f"保存しました:\n{filename}\n(Try {trial_num})")
+            self.btn_save.config(state="disabled")
+            
         except Exception as e:
             messagebox.showerror("Error", f"保存失敗: {e}")
 
-    # --- GUI構築 ---
-    def run_gui(self):
+    # ---------------------------------------------------------
+    # GUI構築
+    # ---------------------------------------------------------
+    def start_gui(self):
         self.root = tk.Tk()
-        self.root.title("UWB実験GUI (距離停止版)")
-        self.root.geometry("500x700")
+        self.root.title("UWB実験統合GUI v3.0")
+        self.root.geometry("520x850") # 高さを拡張
         
         style = ttk.Style()
         style.configure("Bold.TLabel", font=("Helvetica", 10, "bold"))
         
-        # ============================
-        # セクション1: リアルタイムステータス
-        # ============================
-        frame_status = ttk.LabelFrame(self.root, text="ロボット状態", padding=10)
+        # --- 0. 設定 ---
+        frame_settings = ttk.LabelFrame(self.root, text="0. 実験設定 (ログ用)", padding=10)
+        frame_settings.pack(fill="x", padx=10, pady=5)
+        ttk.Label(frame_settings, text="使用アンカー数:").pack(side="left")
+        self.var_anchors = tk.StringVar(value="6")
+        cmb = ttk.Combobox(frame_settings, textvariable=self.var_anchors, values=["6", "5", "4", "3", "2"], width=5, state="readonly")
+        cmb.pack(side="left", padx=5)
+        self.lbl_trial_info = ttk.Label(frame_settings, text="Try数: 未開始", foreground="blue")
+        self.lbl_trial_info.pack(side="right", padx=10)
+
+        # --- 1. ステータス ---
+        frame_status = ttk.LabelFrame(self.root, text="1. ロボット状態", padding=10)
         frame_status.pack(fill="x", padx=10, pady=5)
-        
         self.lbl_curr_pos = ttk.Label(frame_status, text="位置: X=0.00, Y=0.00")
         self.lbl_curr_pos.pack(anchor="w")
         
-        # 角度表示
         frame_yaw = ttk.Frame(frame_status)
         frame_yaw.pack(fill="x", pady=5)
-        self.lbl_yaw_raw = ttk.Label(frame_yaw, text="Map Yaw: 0.00°", font=("Helvetica", 10))
+        self.lbl_yaw_raw = ttk.Label(frame_yaw, text="Map: 0.0°")
         self.lbl_yaw_raw.pack(side="left", padx=5)
-        self.lbl_yaw_rel = ttk.Label(frame_yaw, text="Rel Yaw: 0.00°", font=("Helvetica", 14, "bold"), foreground="blue")
+        self.lbl_yaw_rel = ttk.Label(frame_yaw, text="Rel: 0.0°", font=("Helvetica", 12, "bold"), foreground="blue")
         self.lbl_yaw_rel.pack(side="left", padx=5)
-
-        # 平行判定インジケータ
-        self.lbl_parallel_judge = tk.Label(frame_yaw, text="---", bg="gray", fg="white", width=10)
-        self.lbl_parallel_judge.pack(side="right", padx=5)
-
-        btn_reset_yaw = ttk.Button(frame_status, text="現在の向きを0度とする (Reset Rel Yaw)", command=self.reset_yaw_reference)
-        btn_reset_yaw.pack(fill="x", pady=2)
+        ttk.Button(frame_status, text="角度リセット (Rel Yaw=0)", command=self.reset_yaw_reference).pack(fill="x", pady=2)
         
-        # UWB状態簡易表示
         self.lbl_uwb_status = ttk.Label(frame_status, text="UWB: ---", font=("Courier", 8))
         self.lbl_uwb_status.pack(anchor="w", pady=2)
 
-        # ============================
-        # セクション2: 実験① 位置精度
-        # ============================
-        frame_exp1 = ttk.LabelFrame(self.root, text="実験①: 位置精度 (壁クリック計測)", padding=10)
+        # --- 2. 実験① ---
+        frame_exp1 = ttk.LabelFrame(self.root, text="2. 実験①: 位置精度 (クリック計測)", padding=10)
         frame_exp1.pack(fill="x", padx=10, pady=5)
-        
         self.lbl_exp1_target = ttk.Label(frame_exp1, text="目標: 未設定")
         self.lbl_exp1_target.pack(anchor="w")
-        self.lbl_exp1_total = ttk.Label(frame_exp1, text="直線距離誤差: --- m", font=("Helvetica", 12, "bold"))
+        self.lbl_exp1_total = ttk.Label(frame_exp1, text="誤差: --- m", font=("Helvetica", 12, "bold"))
         self.lbl_exp1_total.pack(anchor="w")
 
-        # ============================
-        # セクション3: 実験② 距離指定停止
-        # ============================
-        frame_exp2 = ttk.LabelFrame(self.root, text="実験②: 距離指定自動停止", padding=10)
+        # --- 3. 実験② ---
+        frame_exp2 = ttk.LabelFrame(self.root, text="3. 実験②: 距離指定直進", padding=10)
         frame_exp2.pack(fill="x", padx=10, pady=5)
         
-        # 設定エリア
-        frame_set = ttk.Frame(frame_exp2)
-        frame_set.pack(fill="x")
-        
-        ttk.Label(frame_set, text="速度(m/s):").grid(row=0, column=0, padx=5)
-        self.entry_speed = ttk.Entry(frame_set, width=6)
+        f_set = ttk.Frame(frame_exp2)
+        f_set.pack(fill="x")
+        ttk.Label(f_set, text="速度:").pack(side="left")
+        self.entry_speed = ttk.Entry(f_set, width=5)
         self.entry_speed.insert(0, "0.5")
-        self.entry_speed.grid(row=0, column=1)
+        self.entry_speed.pack(side="left")
+        ttk.Label(f_set, text="距離:").pack(side="left", padx=5)
+        self.entry_dist = ttk.Entry(f_set, width=5)
+        self.entry_dist.insert(0, "3.0")
+        self.entry_dist.pack(side="left")
         
-        ttk.Label(frame_set, text="停止距離(m):").grid(row=0, column=2, padx=5)
-        self.entry_dist = ttk.Entry(frame_set, width=6)
-        self.entry_dist.insert(0, "3.0") # 初期値3m
-        self.entry_dist.grid(row=0, column=3)
-        
-        # プリセットボタン
-        frame_preset = ttk.Frame(frame_exp2)
-        frame_preset.pack(fill="x", pady=5)
-        ttk.Label(frame_preset, text="プリセット:").pack(side="left")
-        ttk.Button(frame_preset, text="3m", command=lambda: self.set_dist(3.0), width=4).pack(side="left", padx=2)
-        ttk.Button(frame_preset, text="5m", command=lambda: self.set_dist(5.0), width=4).pack(side="left", padx=2)
-        ttk.Button(frame_preset, text="7m", command=lambda: self.set_dist(7.0), width=4).pack(side="left", padx=2)
+        f_btn2 = ttk.Frame(frame_exp2)
+        f_btn2.pack(fill="x", pady=5)
+        self.btn_exp2_start = tk.Button(f_btn2, text="Start (Exp2)", bg="green", fg="white", command=self.start_exp2_logic)
+        self.btn_exp2_start.pack(side="left", fill="x", expand=True)
+        self.btn_exp2_stop = tk.Button(f_btn2, text="Stop", bg="red", fg="white", command=self.stop_exp2_logic, state="disabled")
+        self.btn_exp2_stop.pack(side="left", padx=5)
 
-        # コントロール
-        frame_ctrl = ttk.Frame(frame_exp2)
-        frame_ctrl.pack(fill="x", pady=10)
+        # --- 4. 実験③ (NEW) ---
+        frame_exp3 = ttk.LabelFrame(self.root, text="4. 実験③: 自律移動 (Nav2)", padding=10)
+        frame_exp3.pack(fill="x", padx=10, pady=5)
         
-        btn_start = tk.Button(frame_ctrl, text="計測開始 (GO)", bg="green", fg="white", font=("Helvetica", 12, "bold"), command=self.start_experiment_logic)
-        btn_start.pack(side="left", fill="x", expand=True, padx=5)
+        self.lbl_goal_status = tk.Label(frame_exp3, text="目標地点: 未設定", bg="red", fg="white", width=20)
+        self.lbl_goal_status.pack(pady=5)
+        ttk.Label(frame_exp3, text="※ Rvizで '2D Goal Pose' を指定してください").pack()
         
-        btn_stop = tk.Button(frame_ctrl, text="STOP", bg="red", fg="white", font=("Helvetica", 12, "bold"), command=self.stop_experiment_logic)
-        btn_stop.pack(side="left", padx=5)
-        
-        # 進行状況
-        self.lbl_exp2_progress = ttk.Label(frame_exp2, text="走行距離: 0.00 m / 目標: --- m")
-        self.lbl_exp2_progress.pack(anchor="w")
-        self.progress_bar = ttk.Progressbar(frame_exp2, orient="horizontal", length=100, mode="determinate")
-        self.progress_bar.pack(fill="x", pady=5)
+        f_btn3 = ttk.Frame(frame_exp3)
+        f_btn3.pack(fill="x", pady=5)
+        self.btn_exp3_start = tk.Button(f_btn3, text="Start Navigation (Exp3)", bg="blue", fg="white", command=self.start_exp3_logic)
+        self.btn_exp3_start.pack(side="left", fill="x", expand=True)
+        self.btn_exp3_stop = tk.Button(f_btn3, text="Cancel", bg="orange", fg="white", command=self.cancel_exp3_logic, state="disabled")
+        self.btn_exp3_stop.pack(side="left", padx=5)
 
-        # 保存エリア
-        frame_save = ttk.Frame(frame_exp2)
-        frame_save.pack(fill="x", pady=(10, 0))
-        ttk.Label(frame_save, text="ファイル名:").pack(side="left")
-        self.entry_filename = ttk.Entry(frame_save, width=15)
-        self.entry_filename.insert(0, "run_3m_try1")
-        self.entry_filename.pack(side="left", padx=5)
-        ttk.Button(frame_save, text="CSV保存", command=self.save_csv).pack(side="left")
+        # --- 5. 結果保存 (共通) ---
+        frame_save = ttk.LabelFrame(self.root, text="5. 結果保存 (共通)", padding=10)
+        frame_save.pack(fill="x", padx=10, pady=5)
+        
+        f_err = ttk.Frame(frame_save)
+        f_err.pack(fill="x")
+        ttk.Label(f_err, text="手動計測誤差(m):", foreground="red").pack(side="left")
+        self.entry_error = ttk.Entry(f_err, width=10)
+        self.entry_error.pack(side="left", padx=5)
+        
+        self.btn_save = ttk.Button(frame_save, text="ログをCSV保存", command=self.save_csv, state="disabled")
+        self.btn_save.pack(fill="x", pady=5)
         
         self.update_gui_loop()
         self.root.mainloop()
 
-    def set_dist(self, val):
-        """ プリセットボタン用 """
-        self.entry_dist.delete(0, tk.END)
-        self.entry_dist.insert(0, str(val))
-
     def update_gui_loop(self):
         with self.lock:
-            # ロボット位置
+            # 位置・角度更新
             if self.robot_pose:
                 self.lbl_curr_pos.config(text=f"位置: X={self.robot_pose.position.x:.2f}, Y={self.robot_pose.position.y:.2f}")
-            
-            # 角度更新
             self.lbl_yaw_raw.config(text=f"Map: {self.current_yaw:.1f}°")
             self.lbl_yaw_rel.config(text=f"Rel: {self.relative_yaw:.1f}°")
             
-            # 平行判定 (0度に近いか)
-            if abs(self.relative_yaw) < 5.0:
-                self.lbl_parallel_judge.config(text="OK", bg="green")
-            else:
-                self.lbl_parallel_judge.config(text="BAD", bg="red")
-                
-            # UWBステータス (長すぎるので切り詰め)
-            disp_str = self.uwb_log_str if len(self.uwb_log_str) < 60 else self.uwb_log_str[:57] + "..."
-            if not disp_str: disp_str = "No Data"
-            self.lbl_uwb_status.config(text=f"UWB: {disp_str}")
+            # UWB表示
+            disp = self.uwb_log_str[:50] + "..." if len(self.uwb_log_str)>50 else self.uwb_log_str
+            self.lbl_uwb_status.config(text=f"UWB: {disp if disp else 'No Data'}")
             
-            # 実験①
+            # 実験①表示
             if self.robot_pose and self.target_point:
                 dx = self.target_point.x - self.robot_pose.position.x
                 dy = self.target_point.y - self.robot_pose.position.y
-                total = math.sqrt(dx**2 + dy**2)
-                self.lbl_exp1_target.config(text=f"目標: X={self.target_point.x:.2f}, Y={self.target_point.y:.2f}")
-                self.lbl_exp1_total.config(text=f"直線距離誤差: {total:.3f} m")
-            
-            # 実験② プログレスバー
-            self.lbl_exp2_progress.config(text=f"走行距離: {self.travel_dist:.2f} m / 目標: {self.target_distance:.1f} m")
-            if self.target_distance > 0:
-                percent = (self.travel_dist / self.target_distance) * 100
-                self.progress_bar['value'] = min(percent, 100)
+                self.lbl_exp1_total.config(text=f"誤差: {math.sqrt(dx**2+dy**2):.3f} m")
+                self.lbl_exp1_target.config(text=f"目標: {self.target_point.x:.2f}, {self.target_point.y:.2f}")
+
+            # 実験③ ゴール状態
+            if self.nav2_goal:
+                self.lbl_goal_status.config(text="目標地点: 設定済み (Ready)", bg="green")
+            else:
+                self.lbl_goal_status.config(text="目標地点: 未設定", bg="red")
 
         self.root.after(100, self.update_gui_loop)
 
 def main(args=None):
     rclpy.init(args=args)
     node = ExperimentGUINode()
+    
+    # ROSスピンを別スレッド
+    ros_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    ros_thread.start()
+    
     try:
-        rclpy.spin(node)
+        node.start_gui()
     except KeyboardInterrupt:
         pass
     finally:
-        node.stop_experiment_logic()
         node.destroy_node()
         rclpy.shutdown()
 

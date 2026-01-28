@@ -26,8 +26,8 @@ class UwbEkfNode(Node):
 
         # --- パラメータ宣言 ---
         self.declare_parameter('num_anchors', 3)
-        self.declare_parameter('anchor_height', 1.27)
-        self.declare_parameter('tag_height', 0.6)
+        self.declare_parameter('anchor_height', 1.43)
+        self.declare_parameter('tag_height', 0.69)
         self.declare_parameter('history_size', 5)
         self.declare_parameter('variance_threshold', 0.05)
         self.declare_parameter('R_nlos_multiplier', 20.0)
@@ -168,19 +168,8 @@ class UwbEkfNode(Node):
         # 1. オドメトリから v (並進速度) を取得
         if self.latest_odom:
             linear_vel = self.latest_odom.twist.twist.linear.x
-        
-        # 2. IMUから w (角速度) を取得 (最優先)
-        if self.latest_imu:
-            angular_vel = self.latest_imu.angular_velocity.z
-            if self.latest_odom is None:
-                 self.get_logger().warn("IMU data received, but no Odom data. Linear velocity is 0.", throttle_duration_sec=5)
-        
-        # 3. IMUがなければ、オドメトリから w を取得
-        elif self.latest_odom:
             angular_vel = self.latest_odom.twist.twist.angular.z
-            self.get_logger().warn("No IMU data. Falling back to Odom for angular velocity. (Rotation might drift)", throttle_duration_sec=5)
         
-        # 4. どちらもなければ、0のまま
         else:
             self.get_logger().warn("No Odom or IMU data received. EKF predicting with zero velocity.", throttle_duration_sec=5)
             
