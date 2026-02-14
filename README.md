@@ -4,10 +4,11 @@ English: [English version / README_en.md](README_en.md)
 
 最終更新日：2026年2月14日
 
+![トップ画像](./images/hero.png)
 
 
 動画を作成しました。ざっくり概要をご覧ください。
-[別タブで動画を見る](https://s3-ap-northeast-1.amazonaws.com/mp4.video.honko.kanazawa-it.ac.jp/20251118nakazawa_jiritsu.mp4)
+[動画を見る](https://s3-ap-northeast-1.amazonaws.com/mp4.video.honko.kanazawa-it.ac.jp/20251118nakazawa_jiritsu.mp4)
 
 動画引用元：[【国際ロボット展2025に情報工学科 中沢実研究室が出展】
 12月3日(水)から6日(土)まで東京ビッグサイトで。対話型AI、自己位置推定ロボット、交通流解析、遠隔コミュニケーション支援に関する最新成果を展示](https://www.kanazawa-it.ac.jp/kitnews/2025/1118_nakazawa.html)

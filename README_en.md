@@ -1,9 +1,10 @@
 # Robust Global Localization and Autonomous Navigation using UWB and Sensor Fusion
 Last updated: 14 Feb 2026
 
+![トップ画像](./images/hero.png)
 A short video and overview are available below.
 
-[Watch video in a new tab](https://s3-ap-northeast-1.amazonaws.com/mp4.video.honko.kanazawa-it.ac.jp/20251118nakazawa_jiritsu.mp4)
+[Watch video](https://s3-ap-northeast-1.amazonaws.com/mp4.video.honko.kanazawa-it.ac.jp/20251118nakazawa_jiritsu.mp4)
 
 Video source: [Kanazawa Institute of Technology — Nakazawa Lab exhibition at International Robot Exhibition 2025](https://www.kanazawa-it.ac.jp/kitnews/2025/1118_nakazawa.html)
 
