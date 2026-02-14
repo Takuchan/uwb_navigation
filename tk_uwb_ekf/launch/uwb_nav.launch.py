@@ -12,6 +12,8 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     map_yaml_file = LaunchConfiguration('map', default=os.path.join(tk_uwb_ekf_dir, 'maps', 'map.yaml')) 
     params_file = LaunchConfiguration('params_file', default=os.path.join(tk_uwb_ekf_dir, 'param', 'nav2_params_uwb.yaml'))
+    anchor_height = LaunchConfiguration('anchor_height', default='0.0')
+    tag_height = LaunchConfiguration('tag_height', default='0.0')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -29,11 +31,25 @@ def generate_launch_description():
             default_value=params_file,
             description='Full path to the ROS2 parameters file to use'
         ),
+        DeclareLaunchArgument(
+            'anchor_height',
+            default_value='0.0',
+            description='Height of UWB anchors from ground (in meters)'
+        ),
+        DeclareLaunchArgument(
+            'tag_height',
+            default_value='0.0',
+            description='Height of UWB tag from ground (in meters)'
+        ),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(tk_uwb_ekf_dir, 'launch', 'ekf_with_serial.launch.py')
-            )
+            ),
+            launch_arguments={
+                'anchor_height': anchor_height,
+                'tag_height': tag_height
+            }.items()
         ),
 
         IncludeLaunchDescription(

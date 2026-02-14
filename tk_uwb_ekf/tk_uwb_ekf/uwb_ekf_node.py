@@ -7,62 +7,86 @@ import json
 from collections import deque
 
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu  # <<< [NEW] IMUのメッセージ型をインポート
 from geometry_msgs.msg import TransformStamped
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_from_euler
 
 from filterpy.kalman import ExtendedKalmanFilter
-import math 
+import math
+
+# アンカー数の制限（アルファベットラベルの制限による）
+MIN_ANCHORS = 3
+MAX_ANCHORS = 26 
 
 class UwbEkfNode(Node):
     def __init__(self):
         super().__init__('uwb_ekf_node')
 
         # --- パラメータ宣言 ---
-        self.declare_parameter('anchor_a_pos', [0.0, 5.0])
-        self.declare_parameter('anchor_b_pos', [5.0, 5.0])
-        self.declare_parameter('anchor_c_pos', [2.5, 0.0])
-        
-        # UWBデータフィルタリング用パラメータ
+        self.declare_parameter('num_anchors', 3)
+        self.declare_parameter('anchor_height', 1.43)
+        self.declare_parameter('tag_height', 0.69)
         self.declare_parameter('history_size', 5)
-        self.declare_parameter('variance_threshold', 0.05) # <<< 変更: nlos_を削除し、全データに適用
-        self.declare_parameter('R_nlos_multiplier', 4.0)
-        
-        self.declare_parameter('stationary_velocity_threshold', 0.02) # 停止とみなす速度のしきい値 (m/s, rad/s)
-        self.declare_parameter('R_stationary_multiplier', 10.0) # 停止時にRを何倍にするか
+        self.declare_parameter('variance_threshold', 0.05)
+        self.declare_parameter('R_nlos_multiplier', 20.0)
+        self.declare_parameter('stationary_velocity_threshold', 0.02)
+        self.declare_parameter('R_stationary_multiplier', 20.0)
 
+        self.num_anchors = self.get_parameter('num_anchors').get_parameter_value().integer_value
+        
+        # アンカー数の妥当性チェック
+        if self.num_anchors < MIN_ANCHORS:
+            self.get_logger().error(f"num_anchors must be at least {MIN_ANCHORS}, got {self.num_anchors}")
+            raise ValueError(f"num_anchors must be at least {MIN_ANCHORS}")
+        if self.num_anchors > MAX_ANCHORS:
+            self.get_logger().error(f"num_anchors must be at most {MAX_ANCHORS}, got {self.num_anchors}")
+            raise ValueError(f"num_anchors must be at most {MAX_ANCHORS} (limited by alphabet labels)")
+        
+        self.get_logger().info(f"アンカーのたかさは{self.get_parameter('anchor_height').get_parameter_value()}")
+        self.get_logger().info(f"アンカーのたかさは{self.get_parameter('tag_height').get_parameter_value()}")
+        self.anchor_height = self.get_parameter('anchor_height').get_parameter_value().double_value
+        self.tag_height = self.get_parameter('tag_height').get_parameter_value().double_value
         self.history_size = self.get_parameter('history_size').get_parameter_value().integer_value
         self.variance_threshold = self.get_parameter('variance_threshold').get_parameter_value().double_value
         self.R_nlos_multiplier = self.get_parameter('R_nlos_multiplier').get_parameter_value().double_value
         self.stationary_velocity_threshold = self.get_parameter('stationary_velocity_threshold').get_parameter_value().double_value
         self.R_stationary_multiplier = self.get_parameter('R_stationary_multiplier').get_parameter_value().double_value
         
-        self.anchor_positions = {
-            'a': self.get_parameter('anchor_a_pos').get_parameter_value().double_array_value,
-            'b': self.get_parameter('anchor_b_pos').get_parameter_value().double_array_value,
-            'c': self.get_parameter('anchor_c_pos').get_parameter_value().double_array_value,
-        }
-        self.anchor_map = {0: 'a', 1: 'b', 2: 'c'}
+        # 動的にアンカー位置を読み込む
+        self.anchor_positions = {}
+        self.anchor_map = {}
+        for i in range(self.num_anchors):
+            anchor_label = chr(97 + i)
+            param_name = f'anchor_{anchor_label}_pos'
+            self.declare_parameter(param_name, [0.0, 0.0])
+            pos_2d = self.get_parameter(param_name).get_parameter_value().double_array_value
+            self.anchor_positions[anchor_label] = self._convert_to_3d_position(list(pos_2d))
+            self.anchor_map[i] = anchor_label
+        
+        self.get_logger().info(f"Number of anchors: {self.num_anchors}")
+        self.get_logger().info(f"Anchor height: {self.anchor_height}m, Tag height: {self.tag_height}m")
         self.get_logger().info(f"Anchor positions: {self.anchor_positions}")
 
         # EKF設定
         self.ekf = ExtendedKalmanFilter(dim_x=5, dim_z=1)
         self.ekf.x = np.array([[0.0, 0.0, 0.0, 0.0, 0.0]]).T
         self.ekf.P = np.diag([1.0, 1.0, np.pi, 1.0, 0.5])
-        self.ekf.Q = np.diag([0.01, 0.01, 0.01, 0.05, 0.05])
+        self.ekf.Q = np.diag([0.01, 0.01, 0.01, 0.05, 0.01]) # <-- omegaのQ (5番目) を 0.05 から 0.01 に変更
         self.R_uwb = np.diag([0.3**2]) 
 
         # 内部変数
         self.last_time = self.get_clock().now()
         self.latest_odom = None
         self.latest_uwb_data = None
+        self.latest_imu = None 
         self.distance_history = {twr_id: deque(maxlen=self.history_size) for twr_id in self.anchor_map.keys()}
 
         # ROS通信設定
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.uwb_sub = self.create_subscription(String,'/uwb_data_json',self.uwb_callback,10)
+        self.imu_sub = self.create_subscription(Imu, "/imu/data", self.imu_callback, 10)
         self.filtered_odom_pub = self.create_publisher(Odometry, '/odometry/filtered', 10)
         self.tf_broadcaster = TransformBroadcaster(self)
         self.timer = self.create_timer(0.05, self.timer_callback)
@@ -74,6 +98,9 @@ class UwbEkfNode(Node):
     def odom_callback(self, msg):
         self.latest_odom = msg
 
+    def imu_callback(self, msg):
+        self.latest_imu = msg
+
     def uwb_callback(self,msg):
         try:
             self.latest_uwb_data = json.loads(msg.data)
@@ -83,6 +110,7 @@ class UwbEkfNode(Node):
     def state_transition_function(self, x, dt):
         x_new = np.copy(x)
         theta, v, w = x[2, 0], x[3, 0], x[4, 0]
+        # このwは、timer_callbackでIMU(またはOdom)から更新された最新の値が使われる
         x_new[0] = x[0, 0] + v * dt * np.cos(theta)
         x_new[1] = x[1, 0] + v * dt * np.sin(theta)
         x_new[2] = x[2, 0] + w * dt
@@ -97,6 +125,20 @@ class UwbEkfNode(Node):
         F[1, 3] = dt * np.sin(theta)
         F[2, 4] = dt
         return F
+    
+    def _convert_to_3d_position(self, pos):
+        if len(pos) == 2:
+            return pos + [self.anchor_height]
+        elif len(pos) >= 3:
+            pos_3d = pos[:3]
+            if all(isinstance(x, (int, float)) for x in pos_3d):
+                return pos_3d
+            else:
+                self.get_logger().warn(f"Invalid position values in {pos}, using default [0, 0, anchor_height]")
+                return [0.0, 0.0, self.anchor_height]
+        else:
+            self.get_logger().warn(f"Invalid position format: {pos}, using default [0, 0, anchor_height]")
+            return [0.0, 0.0, self.anchor_height]
 
     def h_uwb(self, x, anchor_pos):
         dx = x[0, 0] - anchor_pos[0]
@@ -119,15 +161,29 @@ class UwbEkfNode(Node):
         if dt <= 0: return
 
         is_stationary = False
+        # ロボットの速度
+        linear_vel = 0.0
+        angular_vel = 0.0
+
+        # 1. オドメトリから v (並進速度) を取得
         if self.latest_odom:
             linear_vel = self.latest_odom.twist.twist.linear.x
             angular_vel = self.latest_odom.twist.twist.angular.z
-            self.ekf.x[3,0] = linear_vel
-            self.ekf.x[4,0] = angular_vel
-            if abs(linear_vel) < self.stationary_velocity_threshold and \
-               abs(angular_vel) < self.stationary_velocity_threshold:
-                is_stationary = True
         
+        else:
+            self.get_logger().warn("No Odom or IMU data received. EKF predicting with zero velocity.", throttle_duration_sec=5)
+            
+        # EKFの状態ベクトル x の速度成分を、センサからの最新値で上書きする
+        # (これが予測ステップ state_transition_function で使われる)
+        self.ekf.x[3,0] = linear_vel
+        self.ekf.x[4,0] = angular_vel
+        
+        # 停止判定
+        if abs(linear_vel) < self.stationary_velocity_threshold and \
+           abs(angular_vel) < self.stationary_velocity_threshold:
+            is_stationary = True
+        
+       
         # 1. 予測フェーズ
         F = self.state_transition_jacobian(self.ekf.x, dt)
         self.ekf.P = F @ self.ekf.P @ F.T + self.ekf.Q
@@ -143,18 +199,16 @@ class UwbEkfNode(Node):
                 
                 self.distance_history[twr_index].append(data['distance'])
                 
-                # 履歴が溜まるまではフィルタしない
                 if len(self.distance_history[twr_index]) < self.history_size:
                     continue 
 
                 variance = np.var(self.distance_history[twr_index])
                 if variance > self.variance_threshold:
                     self.get_logger().warning(f"❌データ不採用 [不安定] from TWR{twr_index} (variance: {variance:.4f})")
-                    continue # 分散が大きすぎるので、このデータは使わない
+                    continue
 
                 current_R = self.R_uwb
 
-                # nLOSなら信頼度を下げる
                 if data['nlos_los'] == 'nLOS':
                     current_R = self.R_uwb * self.R_nlos_multiplier
 
@@ -164,7 +218,18 @@ class UwbEkfNode(Node):
                 anchor_id = self.anchor_map.get(twr_index)
                 if anchor_id:
                     anchor_pos = self.anchor_positions[anchor_id]
-                    z = np.array([[data['distance']]])
+                    slant_range = data['distance']
+                    height_diff = abs(self.tag_height - anchor_pos[2])
+                    if (slant_range < height_diff):
+                        self.get_logger().warn(
+                            f"{anchor_id}:"
+                            f"UWBからの距離データ{slant_range:.2f}m < 高さ差{height_diff:.2f}m"
+                        )
+                        continue
+
+                    horizontal_distance = np.sqrt(slant_range**2 - height_diff**2)
+                    z = np.array([[horizontal_distance]])
+
                     
                     self.ekf.update(z, HJacobian=self.H_uwb, Hx=self.h_uwb, R=current_R,
                                     args=(anchor_pos,), hx_args=(anchor_pos,))
@@ -250,6 +315,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        node.destroy_node() # <<< [MODIFIED] ノードのクリーンシャットダウン
         rclpy.shutdown()
 
 if __name__ == '__main__':

@@ -16,9 +16,9 @@ class UWBPublisherNode(Node):
         super().__init__('uwb_data_publisher')
 
         # パラメータの宣言（ROS2経由で値を変更可能にする）
-        self.declare_parameter('com_port', '/dev/ttyUSB0')
+        self.declare_parameter('com_port', '/dev/ttyUSB1')
         self.declare_parameter('baud_rate', 3000000)
-        self.declare_parameter('num_anchors', 3)
+        self.declare_parameter('num_anchors', 6)
         self.declare_parameter('publish_rate', 20.0) # Hz
 
         # パラメータの取得
