@@ -13,7 +13,7 @@ Video source: [Kanazawa Institute of Technology — Nakazawa Lab exhibition at I
 - Exhibition at the International Robot Exhibition 2025
 - Featured in media "物語の始まりへ"
 
-License: MIT License
+License: [MIT License](./LICENSE)
 
 ## Research Summary
 "Keep moving even where radio coverage dies." 

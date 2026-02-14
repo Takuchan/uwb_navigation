@@ -20,7 +20,7 @@ English: [English version / README_en.md](README_en.md)
 - 国際ロボット展 2025 展示
 - 物語の始まりへで取り上げられました。
 
-ライセンス：商用利用可能です。ただし、利用した場合は明記してほしいです！
+ライセンス：[MIT License](./LICENSE)
 
 ## 📖 研究概要
 **「電波の死角でも、止まらない。」**
